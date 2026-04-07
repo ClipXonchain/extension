@@ -1,0 +1,100 @@
+{
+  "manifest_version": 3,
+  "name": "ClipX - Track & Trade on X",
+  "version": "1.22.0",
+  "description": "ClipX - Your Co-Pilot & Profile Intelligence for X",
+  "icons": {
+    "16": "public/icon.png",
+    "48": "public/icon.png",
+    "128": "public/icon.png"
+  },
+  "permissions": [
+    "storage",
+    "declarativeNetRequest",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://clipx.app/*",
+    "https://www.clipx.app/*",
+    "https://*.gmgn.ai/*",
+    "https://api.gopluslabs.io/*",
+    "https://api.dexscreener.com/*",
+    "https://api.coingecko.com/*",
+    "https://*.bubblemaps.io/*",
+    "https://syndication.twitter.com/*"
+  ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_1",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  },
+  "side_panel": {
+    "default_path": "src/popup.html"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "ClipX - Track & Trade on X"
+  },
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "src/content.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://clipx.app/*",
+        "https://www.clipx.app/*"
+      ],
+      "js": [
+        "src/auth-sync.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://gmgn.ai/*",
+        "https://*.gmgn.ai/*",
+        "https://www.gmgn.cc/*"
+      ],
+      "js": [
+        "src/wallet_content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' https://unavatar.io https://abs.twimg.com https://pbs.twimg.com; frame-src https://iframe.bubblemaps.io https://app.bubblemaps.io https://*.bubblemaps.io https://faster100x.com https://app.insightx.network https://*.insightx.network https://gmgn.ai https://*.gmgn.ai https://www.gmgn.cc https://*.gmgn.cc https://dexscreener.com https://*.dexscreener.com;"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "src/bubble_embed.html",
+        "src/gmgn_embed.html",
+        "src/wallet_inject.js",
+        "src/kaching.mp3",
+        "src/contracts/TokenManager2.lite.abi",
+        "src/contracts/TokenManagerHelper3.abi",
+        "public/bs.png"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ]
+    }
+  ]
+}

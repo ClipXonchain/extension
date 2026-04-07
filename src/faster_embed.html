@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>Faster100x Embed</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #09090b;
+        }
+
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #a1a1aa;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 12px;
+        }
+
+        .error {
+            display: none;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #ef4444;
+            font-family: sans-serif;
+            font-size: 12px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="loading">Loading Faster100x...</div>
+    <div class="error">
+        <div>Faster100x cannot be embedded</div>
+        <a id="fallback-link" href="#" target="_blank"
+            style="color: #fff; margin-top: 8px; display: inline-block; background: #f59e0b; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600;">Open
+            in New Tab →</a>
+    </div>
+    <script src="faster_embed.js"></script>
+</body>
+
+</html>

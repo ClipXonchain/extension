@@ -1,0 +1,15 @@
+# Local / secrets
+.env
+.env.*
+!.env.example
+
+# IDE & tooling
+.cursor/
+.vscode/
+.idea/
+*.code-workspace
+
+# Logs & OS
+*.log
+.DS_Store
+Thumbs.db

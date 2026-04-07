@@ -1,0 +1,1415 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClipX</title>
+    <style>
+        :root {
+            --bg-body: #000000;
+            --bg-card: #09090b;
+            --bg-input: #18181b;
+            --text-main: #ffffff;
+            --text-muted: #a1a1aa;
+            --primary: #8b5cf6;
+            --primary-hover: #7c3aed;
+            --accent: #c084fc;
+            --border: #27272a;
+            --success: #10b981;
+            --error: #ef4444;
+            --gradient: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+            --radius-full: 9999px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            width: 360px;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-body);
+            color: var(--text-main);
+            min-height: 500px;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #27272a;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #3f3f46;
+        }
+
+        .container {
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 8px;
+            /* border-bottom: 1px solid var(--border); */
+        }
+
+        .logo-area {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .logo-icon {
+            font-size: 20px;
+        }
+
+        .logo-text h1 {
+            font-size: 16px;
+            font-weight: 800;
+            background: var(--gradient);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: -0.5px;
+            font-style: italic;
+        }
+
+        .logo-text p {
+            font-size: 10px;
+            color: var(--text-muted);
+            display: none;
+            /* Hide subtitle for cleaner look */
+        }
+
+        .settings-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+        }
+
+        .settings-btn:hover {
+            background: var(--bg-input);
+            color: var(--text-main);
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            padding: 16px;
+            border: 1px solid var(--border);
+            /* box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); */
+        }
+
+        /* Wallet Balance */
+        .balance-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+
+        .balance-item {
+            background: var(--bg-input);
+            padding: 12px;
+            border-radius: var(--radius-md);
+            text-align: center;
+            border: 1px solid transparent;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .balance-item:hover {
+            border-color: var(--primary);
+            /* transform: translateY(-2px); */
+        }
+
+        .token-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+        }
+
+        .token-amount {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-main);
+        }
+
+        /* User Info */
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            background: var(--bg-input);
+            padding: 12px;
+            border-radius: var(--radius-full);
+            /* Pill shape for user info */
+            border: 1px solid var(--border);
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--bg-card);
+            background-size: cover;
+            background-position: center;
+            border: 1px solid var(--border);
+        }
+
+        .user-details {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .username {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .handle {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: var(--radius-full);
+            font-size: 10px;
+            font-weight: 600;
+            margin-left: auto;
+        }
+
+        .status-badge.registered {
+            background: rgba(16, 185, 129, 0.1);
+            color: #34d399;
+        }
+
+        .status-badge.not-registered {
+            background: rgba(239, 68, 68, 0.1);
+            color: #f87171;
+        }
+
+        .status-badge.loading {
+            background: rgba(251, 191, 36, 0.1);
+            color: #fbbf24;
+        }
+
+        /* Forms */
+        .input-group {
+            margin-bottom: 12px;
+        }
+
+        .input-label {
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            margin-left: 4px;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--bg-input);
+            border: 1px solid transparent;
+            border-radius: var(--radius-full);
+            color: var(--text-main);
+            font-size: 13px;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: var(--bg-card);
+            /* box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2); */
+        }
+
+        /* Token Select Customization */
+        select.form-control {
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%23a1a1aa'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 16px center;
+            background-size: 16px;
+        }
+
+        /* Buttons */
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: var(--radius-full);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+            /* box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3); */
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: var(--primary-hover);
+            /* transform: translateY(-1px); */
+            /* box-shadow: 0 6px 16px rgba(139, 92, 246, 0.4); */
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: var(--bg-input);
+            color: var(--text-muted);
+        }
+
+        .btn-secondary:hover {
+            background: #27272a;
+            color: var(--text-main);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        /* Transactions */
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            padding: 0 4px;
+        }
+
+        .tx-list {
+            max-height: 160px;
+            overflow-y: auto;
+        }
+
+        .tx-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            transition: background 0.2s;
+        }
+
+        .tx-item:hover {
+            background: var(--bg-input);
+        }
+
+        .tx-item:last-child {
+            border-bottom: none;
+        }
+
+        .tx-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .tx-title {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-main);
+        }
+
+        .tx-time {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .tx-value {
+            font-size: 12px;
+            font-weight: 700;
+        }
+
+        .tx-value.sent {
+            color: var(--error);
+        }
+
+        .tx-value.received {
+            color: var(--success);
+        }
+
+        /* Loading & Messages */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--bg-body);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 10;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--bg-input);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 12px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .message-box {
+            padding: 12px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            margin-bottom: 16px;
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .message-box.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .message-box.success {
+            background: rgba(16, 185, 129, 0.1);
+            color: #6ee7b7;
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .message-box.info {
+            background: rgba(139, 92, 246, 0.1);
+            color: #c4b5fd;
+            border: 1px solid rgba(139, 92, 246, 0.2);
+        }
+
+        /* Toggle Switch */
+        .toggle-label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            padding: 8px 0;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        /* .toggle-label:hover {
+            background: var(--bg-input);
+        } */
+
+        .toggle-switch {
+            width: 40px;
+            height: 22px;
+            background: var(--bg-input);
+            border-radius: 999px;
+            position: relative;
+            transition: background 0.2s;
+            border: 1px solid var(--border);
+        }
+
+        .toggle-checkbox:checked+.toggle-switch {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .toggle-knob {
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            transition: transform 0.2s;
+        }
+
+        .toggle-checkbox:checked+.toggle-switch .toggle-knob {
+            transform: translateX(18px);
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            background: var(--bg-input);
+            padding: 4px;
+            border-radius: var(--radius-full);
+            margin-bottom: 0;
+            border: 1px solid var(--border);
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border-radius: var(--radius-full);
+            transition: all 0.2s;
+        }
+
+        .tab-btn.active {
+            background: var(--bg-card);
+            color: var(--text-main);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Trade Token UI */
+        .quick-buy-btn {
+            padding: 8px;
+            font-size: 11px;
+            background: var(--bg-input);
+            border: 1px solid transparent;
+        }
+
+        .quick-buy-btn:hover {
+            border-color: var(--primary);
+            background: var(--bg-card);
+        }
+
+        .chart-placeholder {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chart-placeholder::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 45%, rgba(255, 255, 255, 0.05) 50%, transparent 55%);
+            background-size: 200% 200%;
+            animation: shimmer 2s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                background-position: -100% -100%;
+            }
+
+            100% {
+                background-position: 100% 100%;
+            }
+        }
+
+        /* Mining Balance Widget Styles */
+        #mining-balance-widget {
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(217, 70, 239, 0.1) 100%);
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            margin-bottom: 12px;
+        }
+
+        #withdraw-mining-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background: var(--bg-input);
+        }
+
+        #withdraw-mining-btn:not(:disabled) {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            animation: pulse-glow 2s infinite;
+        }
+
+        @keyframes pulse-glow {
+
+            0%,
+            100% {
+                opacity: 1;
+                box-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
+            }
+
+            50% {
+                opacity: 0.9;
+                box-shadow: 0 0 20px rgba(16, 185, 129, 0.5);
+            }
+        }
+
+        /* Daily Tasks Widget Styles */
+        #daily-tasks-widget {
+            background: linear-gradient(135deg, rgba(234, 179, 8, 0.1) 0%, rgba(251, 191, 36, 0.1) 100%);
+            border: 1px solid rgba(234, 179, 8, 0.3);
+            margin-bottom: 12px;
+        }
+
+        .task-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px;
+            background: var(--bg-input);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .task-item:hover {
+            background: rgba(139, 92, 246, 0.1) !important;
+            transform: translateX(2px);
+        }
+
+        .task-item.completed {
+            opacity: 0.8;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        .task-item.completed .task-status {
+            color: var(--success) !important;
+        }
+
+        .task-item.completed .task-icon::after {
+            content: '✓';
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            font-size: 12px;
+            color: var(--success);
+            font-weight: bold;
+            background: var(--bg-card);
+            border-radius: 50%;
+            width: 14px;
+            height: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--success);
+        }
+
+        /* Modern Category UI */
+        .category-grid {
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+            padding: 4px !important;
+        }
+
+        .category-card {
+            background: linear-gradient(145deg, rgba(39, 39, 42, 0.4) 0%, rgba(9, 9, 11, 0.6) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: row;
+            /* Row layout for list */
+            align-items: center;
+            justify-content: flex-start;
+            /* Align left */
+            text-align: left;
+            gap: 16px;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+            backdrop-filter: blur(10px);
+        }
+
+        .category-card:hover {
+            transform: translateX(4px);
+            /* Slide right slightly */
+            border-color: rgba(139, 92, 246, 0.5);
+            background: linear-gradient(145deg, rgba(39, 39, 42, 0.6) 0%, rgba(9, 9, 11, 0.8) 100%);
+        }
+
+        .category-icon {
+            /* Smaller icon for list view */
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0;
+            /* Reset margin */
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            flex-shrink: 0;
+        }
+
+        .category-info {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            flex: 1;
+            /* Take remaining space */
+        }
+
+        .category-name {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main);
+            letter-spacing: 0.3px;
+        }
+
+        .category-count {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: transparent;
+            /* Remove background for list */
+            padding: 0;
+            border-radius: 0;
+        }
+
+        .category-arrow {
+            color: var(--text-muted);
+            opacity: 0.5;
+            font-size: 14px;
+        }
+
+        .user-list-item {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            background: var(--bg-input);
+            border: 1px solid transparent;
+            border-radius: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .user-list-item:hover {
+            background: var(--bg-card);
+            border-color: var(--primary);
+            transform: translateX(2px);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Professional Login Screen -->
+    <div id="login-screen" class="container"
+        style="display: none; position: absolute; top:0; left:0; width:100%; height:100%; z-index: 1000; background: linear-gradient(135deg, #09090b 0%, #000000 100%); overflow-y: auto; flex-direction: column; justify-content: center; align-items: center; padding: 32px;">
+
+        <button id="closeLoginBtn"
+            style="position: absolute; top: 16px; right: 16px; background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 8px;">✕</button>
+
+        <div style="text-align: center; margin-bottom: 32px;">
+            <div style="font-size: 48px; margin-bottom: 16px; filter: drop-shadow(0 0 20px rgba(139, 92, 246, 0.3));">⚡
+            </div>
+            <h1
+                style="font-size: 24px; font-weight: 800; background: linear-gradient(135deg, #fff 0%, #a1a1aa 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 8px;">
+                ClipX</h1>
+            <p style="font-size: 14px; color: var(--text-muted);">Your Intelligent Copilot for X</p>
+        </div>
+
+        <div style="width: 100%; max-width: 280px; display: flex; flex-direction: column; gap: 12px;">
+            <button id="loginWebBtn" class="btn btn-primary"
+                style="height: 48px; font-size: 15px; box-shadow: 0 4px 20px rgba(139, 92, 246, 0.2);">
+                <span>Connect Account</span>
+                <span style="opacity: 0.7;">→</span>
+            </button>
+
+            <button id="openSidePanelBtn" class="btn btn-secondary"
+                style="height: 48px; font-size: 14px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1);">
+                <span style="font-size: 16px;">◫</span>
+                <span>Open Side Panel</span>
+            </button>
+        </div>
+
+        <div class="status-message" id="loginStatus" style="margin-top: 32px; font-size: 11px; opacity: 0.5;">
+            Status: <span class="badge badge-error">Not Logged In</span>
+        </div>
+    </div>
+
+    <!-- Unlock Wallet Screen -->
+    <div id="unlock-wallet-screen" class="container"
+        style="display: none; position: absolute; top:0; left:0; width:100%; height:100%; z-index: 1000; background: var(--bg-body); overflow-y: auto;">
+        <div class="logo-container">
+            <div class="logo-icon">🔐</div>
+            <h1>Unlock Wallet</h1>
+            <p>Enter your password to access your wallet</p>
+        </div>
+
+        <div class="form-group">
+            <label for="unlockPassword">Password</label>
+            <input type="password" id="unlockPassword" class="form-control" placeholder="Enter your wallet password">
+        </div>
+
+        <button id="unlockWalletBtn" class="btn btn-primary">Unlock Wallet</button>
+        <div id="unlockError"
+            style="color: #ef4444; font-size: 12px; margin-top: 8px; text-align: center; display: none;">
+        </div>
+
+        <div style="margin-top: 20px; text-align: center;">
+            <button id="resetWalletBtn" class="btn btn-secondary" style="font-size: 12px; padding: 4px 8px;">Reset
+                Wallet (Clears Data)</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-area">
+                <div class="logo-icon">⚡</div>
+                <div class="logo-text">
+                    <h1>ClipX</h1>
+                    <p>Trading Assistant</p>
+                </div>
+            </div>
+            <div class="header-actions" style="display: flex; gap: 8px;">
+                <button class="settings-btn" id="headerSidePanelBtn" title="Open in Side Panel"
+                    style="display: flex; align-items: center; justify-content: center;">
+                    <span style="font-size: 16px;">◫</span>
+                </button>
+                <button id="settingsBtn" class="settings-btn" title="Settings">
+                    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z">
+                        </path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Profile Switcher -->
+        <div id="profile-switcher-container" style="display: none; padding: 0 16px; margin-bottom: 8px;">
+            <button id="switchProfileBtn" class="btn btn-secondary"
+                style="background: rgba(139, 92, 246, 0.1); color: #c084fc; font-size: 12px; padding: 8px; width: 100%; border: 1px dashed var(--border);">
+                🔁 Switch Account
+            </button>
+        </div>
+
+
+        <!-- Loading Overlay (Initial) -->
+        <div id="loading" class="loading-overlay">
+            <div class="spinner"></div>
+            <span style="font-size: 12px; color: var(--text-muted);">Syncing...</span>
+        </div>
+
+        <!-- Wallet Balance -->
+        <div id="wallet-balance" class="card" style="display: none;">
+            <div class="section-header">
+                <span>Wallet Balance</span>
+                <button id="refreshBalance" class="settings-btn" style="padding: 4px;" title="Refresh">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 4v6h-6"></path>
+                        <path d="M1 20v-6h6"></path>
+                        <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                    </svg>
+                </button>
+            </div>
+            <div class="balance-grid">
+                <div class="balance-item">
+                    <div class="token-label">🟡 BNB</div>
+                    <div id="bal-bnb" class="token-amount">...</div>
+                </div>
+                <div class="balance-item">
+                    <div class="token-label">⚡ CLIPX</div>
+                    <div id="bal-clipx" class="token-amount">...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mining Balance Widget - Hidden for now
+        <div id="mining-balance-widget" class="card" style="display: none;">
+            ...
+        </div>
+        -->
+
+
+        <!-- Daily Tasks Widget - Hidden for now
+        <div id="daily-tasks-widget" class="card" style="display: none;">
+            ...
+        </div>
+        -->
+
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="send-tip">Send Tip</button>
+            <button class="tab-btn" data-tab="watchlist">Watchlist</button>
+            <button class="tab-btn" data-tab="categories">Categories</button>
+            <button class="tab-btn" data-tab="history">History</button>
+            <button class="tab-btn" data-tab="square" id="square-tab-btn" style="color:#F0B90B;">⬡ Square</button>
+        </div>
+
+        <!-- Main Content -->
+        <div id="content" style="display: none; flex-direction: column; gap: 16px;">
+
+            <!-- Send Tip Tab -->
+            <div id="send-tip-tab" class="tab-content active">
+                <div class="card">
+                    <div class="user-info">
+                        <div class="avatar" id="avatar"></div>
+                        <div class="user-details">
+                            <div class="username" id="username">...</div>
+                            <div class="handle" id="handle">@...</div>
+                            <div class="status-badge loading" id="status">
+                                <span id="statusText">Checking...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="errorMessage" class="message-box error" style="display: none;"></div>
+                    <div id="successMessage" class="message-box success" style="display: none;"></div>
+
+                    <!-- Tip Form -->
+                    <div id="tipForm" style="display: none;">
+                        <div class="input-group">
+                            <label class="input-label" for="token">Asset</label>
+                            <select id="token" class="form-control">
+                                <option value="BNB">🟡 BNB</option>
+                                <option value="CLIPX">⚡ CLIPX</option>
+                                <option value="ASTER">✨ ASTER</option>
+                                <option value="USDT">💵 USDT</option>
+                                <option value="GIGGLE">🎭 GIGGLE</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="amount">Amount</label>
+                            <input type="number" id="amount" class="form-control" placeholder="0.00" min="0"
+                                step="0.000001">
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="gasTier">Speed</label>
+                            <select id="gasTier" class="form-control">
+                                <option value="slow">🐢 Slow</option>
+                                <option value="standard" selected>🚗 Standard</option>
+                                <option value="fast">🚀 Fast</option>
+                            </select>
+                        </div>
+
+                        <div class="btn-group">
+                            <button class="btn btn-secondary" id="cancelBtn">Cancel</button>
+                            <button class="btn btn-primary" id="sendBtn">
+                                Send Tip 💸
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Escrow Form -->
+                    <div id="notRegisteredMessage" style="display: none;">
+                        <div class="message-box info">
+                            <div>
+                                <strong>Escrow Mode Active</strong><br />
+                                This user isn't on ClipX yet. The tip will be held for 3 days for them to claim.
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="token2">Asset</label>
+                            <select id="token2" class="form-control">
+                                <option value="BNB">🟡 BNB</option>
+                                <option value="CLIPX">⚡ CLIPX</option>
+                                <option value="ASTER">✨ ASTER</option>
+                                <option value="USDT">💵 USDT</option>
+                                <option value="GIGGLE">🎭 GIGGLE</option>
+                            </select>
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="amount2">Amount</label>
+                            <input type="number" id="amount2" class="form-control" placeholder="0.00" min="0"
+                                step="0.000001">
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label" for="gasTier2">Speed</label>
+                            <select id="gasTier2" class="form-control">
+                                <option value="slow">🐢 Slow</option>
+                                <option value="standard" selected>🚗 Standard</option>
+                                <option value="fast">🚀 Fast</option>
+                            </select>
+                        </div>
+
+                        <button class="btn btn-primary" id="sendEscrowBtn" style="margin-top: 16px;">
+                            Send to Escrow 📦
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Categories Tab -->
+            <div id="categories-tab" class="tab-content">
+                <div id="categories-list" class="category-grid">
+                    <!-- Categories will be injected here -->
+                    <div class="message-box info" style="grid-column: 1 / -1;">Loading categories...</div>
+                </div>
+
+                <div id="category-detail-view" style="display: none;">
+                    <button id="back-to-categories" class="btn btn-secondary"
+                        style="margin-bottom: 12px; font-size: 12px; padding: 6px 12px;">
+                        ← Back to Categories
+                    </button>
+                    <div id="category-title"
+                        style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--primary);">
+                        Category Name
+                    </div>
+                    <div id="category-users-list" style="display: flex; flex-direction: column; gap: 8px;">
+                        <!-- Users will be injected here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div id="history-tab" class="tab-content">
+                <div class="card">
+                    <div class="section-header">
+                        <span>Recent Activity</span>
+                        <span style="font-size: 10px; color: var(--text-muted);">On-chain BSC</span>
+                    </div>
+
+                    <div id="history-loading"
+                        style="text-align: center; padding: 16px; color: var(--text-muted); font-size: 12px; display: none;">
+                        <div class="spinner" style="width: 18px; height: 18px; margin: 0 auto 6px;"></div>
+                        Loading history...
+                    </div>
+
+                    <div id="history-empty"
+                        style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 12px 4px; display: none;">
+                        No recent activity found for this wallet.
+                    </div>
+
+                    <div id="history-list" style="max-height: 260px; overflow-y: auto; display: none;">
+                        <!-- Rows injected by popup.js -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Binance Square Tab -->
+            <div id="square-tab" class="tab-content">
+                <div class="card" style="padding:0;overflow:hidden;">
+
+                    <!-- Header -->
+                    <div style="background:linear-gradient(135deg,#1a1200,#2a1e00);padding:14px 16px;border-bottom:1px solid #F0B90B33;display:flex;justify-content:space-between;align-items:center;">
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <div style="width:28px;height:28px;border-radius:50%;background:#F0B90B;display:flex;align-items:center;justify-content:center;font-weight:900;color:#000;font-size:14px;">B</div>
+                            <div>
+                                <div style="font-weight:700;font-size:13px;color:#F0B90B;">Binance Square</div>
+                                <div style="font-size:10px;color:#a1a1aa;">1-click cross-post from X</div>
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;">
+                            <div id="sq-status-dot" style="width:8px;height:8px;border-radius:50%;background:#52525b;"></div>
+                            <span id="sq-status-text" style="font-size:10px;color:#a1a1aa;">No key</span>
+                        </div>
+                    </div>
+
+                    <div style="padding:14px 16px;display:flex;flex-direction:column;gap:14px;">
+
+                        <!-- 24h Counter Card -->
+                        <div style="background:#0d0d0d;border:1px solid #F0B90B22;border-radius:10px;padding:14px;text-align:center;">
+                            <div style="font-size:38px;font-weight:800;color:#F0B90B;line-height:1;" id="sq-count">0</div>
+                            <div style="font-size:11px;color:#a1a1aa;margin-top:4px;">posts in last 24h</div>
+                            <div style="font-size:10px;color:#52525b;margin-top:6px;" id="sq-reset">resets in —</div>
+                        </div>
+
+                        <!-- API Key Section -->
+                        <div style="display:flex;flex-direction:column;gap:8px;">
+                            <label style="font-size:10px;font-weight:700;color:#a1a1aa;letter-spacing:0.5px;">OPENAPI KEY</label>
+                            <div style="display:flex;gap:6px;">
+                                <input type="password" id="sq-key-input"
+                                    placeholder="Paste your Square API key…"
+                                    style="flex:1;background:#18181b;border:1px solid #27272a;border-radius:8px;padding:8px 10px;color:#fff;font-size:12px;outline:none;font-family:monospace;" />
+                                <button id="sq-key-toggle"
+                                    style="background:#27272a;border:none;border-radius:8px;padding:8px 10px;cursor:pointer;color:#a1a1aa;font-size:12px;flex-shrink:0;">👁</button>
+                            </div>
+                            <div style="display:flex;gap:8px;">
+                                <button id="sq-save-btn"
+                                    style="flex:1;background:#F0B90B;border:none;border-radius:8px;padding:9px;font-weight:700;color:#000;cursor:pointer;font-size:12px;">
+                                    Save Key
+                                </button>
+                                <button id="sq-clear-btn"
+                                    style="background:#18181b;border:1px solid #3f3f46;border-radius:8px;padding:9px 14px;color:#ef4444;cursor:pointer;font-size:12px;">
+                                    Clear
+                                </button>
+                            </div>
+
+                            <!-- Inline clear confirmation (no browser dialog) -->
+                            <div id="sq-clear-confirm"
+                                style="display:none;align-items:center;gap:8px;background:#1a0a0a;border:1px solid #ef444444;border-radius:8px;padding:10px 12px;">
+                                <span style="font-size:11px;color:#fca5a5;flex:1;">Remove saved API key?</span>
+                                <button id="sq-clear-confirm-yes"
+                                    style="background:#ef4444;border:none;border-radius:6px;padding:5px 12px;color:#fff;font-size:11px;font-weight:700;cursor:pointer;">
+                                    Remove
+                                </button>
+                                <button id="sq-clear-confirm-no"
+                                    style="background:#27272a;border:none;border-radius:6px;padding:5px 12px;color:#a1a1aa;font-size:11px;cursor:pointer;">
+                                    Cancel
+                                </button>
+                            </div>
+
+                            <p style="font-size:10px;color:#52525b;line-height:1.5;margin:0;">
+                                🔒 Encrypted with AES-256 · Stored locally · Never sent to ClipX servers
+                            </p>
+                        </div>
+
+                        <!-- Get API key link -->
+                        <a href="https://www.binance.com/en/square/creator-center/home" target="_blank"
+                            style="display:block;text-align:center;font-size:11px;color:#F0B90B;text-decoration:none;padding:8px;background:#F0B90B11;border-radius:8px;border:1px solid #F0B90B22;">
+                            Get your API key from Square Creator Center →
+                        </a>
+
+                    </div>
+                </div>
+            </div>
+
+            <!-- Watchlist Tab -->
+            <div id="watchlist-tab" class="tab-content">
+                <div class="card">
+                    <div class="section-header">
+                        <span>Watchlist</span>
+                        <span style="font-size: 10px; color: var(--text-muted);">BNB Chain</span>
+                    </div>
+
+                    <div class="input-group">
+                        <label class="input-label" for="watchlist-address">Token Address (BSC)</label>
+                        <input type="text" id="watchlist-address" class="form-control" placeholder="0x..." />
+                    </div>
+                    <div class="input-group">
+                        <label class="input-label" for="watchlist-label">Label (optional)</label>
+                        <input type="text" id="watchlist-label" class="form-control" placeholder="e.g. CLIPX Meme" />
+                    </div>
+                    <button class="btn btn-primary" id="watchlist-add-btn" style="margin-bottom: 12px;">Add to
+                        Watchlist</button>
+
+                    <div id="watchlist-empty"
+                        style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 8px 4px; display: none;">
+                        No tokens yet. Add a BSC contract to start tracking.
+                    </div>
+
+                    <div id="watchlist-list" style="max-height: 200px; overflow-y: auto; display: none;">
+                        <!-- Rows injected by popup.js -->
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- Wallet Control Tab -->
+            <div id="wallet-control-tab" class="tab-content">
+                <div class="card">
+                    <div class="section-header">
+                        <span>Native Wallet Management</span>
+                    </div>
+
+                    <div id="native-wallet-ui" style="display: none;">
+                        <div class="input-group">
+                            <label class="input-label">Your Address</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="text" id="wallet-address-display" class="form-control" readonly
+                                    style="font-family: monospace; font-size: 11px; text-overflow: ellipsis;">
+                                <button class="btn btn-secondary" id="copy-address-btn"
+                                    style="width: auto; padding: 8px;">
+                                    📋
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="input-group">
+                            <label class="input-label">Holdings</label>
+                            <div id="assets-container"
+                                style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+                                <!-- Assets will be loaded here -->
+                                <div id="assets-loading"
+                                    style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;">
+                                    <div class="spinner" style="width: 20px; height: 20px; margin: 0 auto 8px;"></div>
+                                    Loading assets...
+                                </div>
+                                <div id="assets-list" style="display: none;"></div>
+                                <div id="assets-empty"
+                                    style="display: none; text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;">
+                                    No tokens found
+                                </div>
+                            </div>
+                            <button class="btn btn-secondary" id="refresh-assets-btn"
+                                style="padding: 8px; font-size: 11px; margin-top: 8px;">
+                                Refresh Assets
+                            </button>
+                        </div>
+
+                        <!-- <div class="input-group">
+                            <label class="input-label">Advanced Wallet Management</label>
+                            <button class="btn btn-secondary" id="open-wallet-management">
+                                ⚙️ Open Wallet Management
+                            </button>
+                            <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+                                View balances, export private key, and more
+                            </div>
+                        </div> -->
+
+                        <!-- Send Funds Section -->
+                        <div class="input-group">
+                            <label class="input-label">Send Funds</label>
+                            <div id="send-funds-form"
+                                style="display: flex; flex-direction: column; gap: 12px; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md);">
+                                <div>
+                                    <label
+                                        style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Recipient
+                                        Address</label>
+                                    <input type="text" id="send-recipient-inline" class="form-control"
+                                        placeholder="0x..." style="font-size: 12px;">
+                                </div>
+                                <div>
+                                    <label
+                                        style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Token</label>
+                                    <select id="send-token-inline" class="form-control" style="font-size: 12px;">
+                                        <option value="BNB">BNB</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label
+                                        style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Amount</label>
+                                    <input type="number" id="send-amount-inline" class="form-control" placeholder="0.0"
+                                        step="any" style="font-size: 12px;">
+                                </div>
+                                <button class="btn btn-primary" id="send-btn-inline"
+                                    style="background: var(--success); padding: 10px;">
+                                    💸 Send Now
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="message-box error" style="margin-top: 16px;">
+                            <div>
+                                <strong>Warning:</strong> Never share your private key. Anyone with this key can steal
+                                your funds.
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" id="logout-btn"
+                            style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); margin-top: 16px;">
+                            Log Out / Remove Wallet
+                        </button>
+                    </div>
+
+                    <div id="no-native-wallet-ui" style="text-align: center; padding: 20px; color: var(--text-muted);">
+                        <p>You are logged in with Twitter.</p>
+                        <button class="btn btn-secondary" id="twitter-logout-btn" style="margin-top: 12px;">
+                            Log Out
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transactions -->
+        <div id="transactions-section" class="card" style="display: none;">
+            <div class="section-header">
+                <span>Recent Activity</span>
+                <a href="https://clipx.app/dashboard" target="_blank"
+                    style="color: var(--accent); text-decoration: none; font-size: 11px;">View All</a>
+            </div>
+            <div id="tx-list-container" class="tx-list">
+                <div class="empty-tx"
+                    style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">
+                    No recent transactions
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="tradeSettingsModal" class="loading-overlay" style="display: none; background: rgba(0,0,0,0.85);">
+            <div class="card" style="width: 90%; max-width: 300px; border-radius: 20px; padding: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                    <h3
+                        style="margin: 0; font-size: 16px; font-weight: 700; background: var(--gradient); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;">
+                        ⚙️ Settings</h3>
+                    <button id="closeTradeSettings" class="settings-btn" style="font-size: 18px;">✕</button>
+                </div>
+
+                <!-- Tips Toggle -->
+                <div
+                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border);">
+                    <label class="toggle-label" style="margin: 0; padding: 0;">
+                        <input type="checkbox" id="showTipsToggle" class="toggle-checkbox" checked>
+                        <div class="toggle-switch">
+                            <div class="toggle-knob"></div>
+                        </div>
+                        <span style="font-size: 13px; color: var(--text-main); font-weight: 500;">
+                            Show Tip Buttons on X
+                        </span>
+                    </label>
+                </div>
+
+                <!-- Market Insight Toggle -->
+                <div
+                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border);">
+                    <label class="toggle-label" style="margin: 0; padding: 0;">
+                        <input type="checkbox" id="showMarketInsightToggle" class="toggle-checkbox" checked>
+                        <div class="toggle-switch">
+                            <div class="toggle-knob"></div>
+                        </div>
+                        <span style="font-size: 13px; color: var(--text-main); font-weight: 500;">
+                            📊 Market Insight on Home
+                        </span>
+                    </label>
+                </div>
+
+                <!-- Label Effect Selector -->
+                <div
+                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; border: 1px solid var(--border);">
+                    <label class="input-label" style="margin-bottom: 10px; display: block; font-size: 11px;">Label
+                        Animation Style</label>
+                    <select id="labelEffectStyle" class="form-control"
+                        style="background: var(--bg-card); border-radius: 8px; padding: 10px 12px; font-size: 13px;">
+                        <option value="spotlight"> Purple Glow</option>
+                        <option value="glow"> Multi Color Glow</option>
+                        <option value="gradient" selected> Gradient</option>
+                    </select>
+                </div>
+
+                <button class="btn btn-primary" id="saveTradeSettings"
+                    style="border-radius: 12px; font-size: 14px; padding: 14px;">
+                    Save Settings
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- Send Funds Modal -->
+    <div id="sendModal" class="loading-overlay" style="display: none; background: rgba(0,0,0,0.8);">
+        <div class="card" style="width: 90%; max-width: 320px;">
+            <div class="section-header">
+                <span>Send Funds</span>
+                <button id="closeSendModal" class="settings-btn">✕</button>
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Recipient</label>
+                <input type="text" id="send-recipient" class="form-control" placeholder="Address (0x...)">
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Token</label>
+                <select id="send-token-select" class="form-control">
+                    <option value="BNB">BNB</option>
+                </select>
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Amount</label>
+                <input type="number" id="send-amount" class="form-control" placeholder="0.0">
+            </div>
+
+            <button class="btn btn-primary" id="confirmSendBtn">Confirm Send</button>
+        </div>
+    </div>
+
+    <!-- Logout Confirmation Modal -->
+    <div id="logoutModal" class="loading-overlay" style="display: none; background: rgba(0,0,0,0.8);">
+        <div class="card" style="width: 90%; max-width: 300px; border: 1px solid var(--border);">
+            <div style="text-align: center; margin-bottom: 16px;">
+                <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
+                <h3 style="color: var(--text-main); margin-bottom: 8px;">Log Out?</h3>
+                <p style="color: var(--text-muted); font-size: 13px; line-height: 1.4;">
+                    Are you sure you want to remove this wallet?
+                    <br><br>
+                    <span style="color: var(--error);">If you haven't saved your Secret Phrase, you will lose access
+                        forever.</span>
+                </p>
+            </div>
+            <div class="btn-group">
+                <button id="cancelLogoutBtn" class="btn btn-secondary">Cancel</button>
+                <button id="confirmLogoutBtn" class="btn btn-primary" style="background: var(--error);">Log Out</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Withdraw Confirmation Modal - Hidden for now
+    <div id="withdrawModal" class="loading-overlay" style="display: none; background: rgba(0,0,0,0.8);">
+        ...
+    </div>
+    -->
+
+
+    <script src="../lib/ethers.js"></script>
+    <script src="popup.js"></script>
+    <!-- <script src="popup_wallet_create.js"></script> -->
+</body>
+
+</html>

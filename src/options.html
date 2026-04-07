@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClipX Wallet Management</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid #f3f4f6;
+        }
+
+        .card-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: #1f2937;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .balance-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .balance-item {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            border-radius: 12px;
+            color: white;
+        }
+
+        .balance-label {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .balance-value {
+            font-size: 24px;
+            font-weight: 700;
+            font-family: 'Courier New', monospace;
+        }
+
+        .balance-usd {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-top: 4px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-size: 13px;
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .info-value {
+            font-size: 13px;
+            color: #1f2937;
+            font-weight: 600;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .btn-secondary:hover {
+            background: #e5e7eb;
+        }
+
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .btn-danger:hover {
+            background: rgba(239, 68, 68, 0.2);
+        }
+
+        .btn-small {
+            padding: 6px 12px;
+            font-size: 12px;
+        }
+
+        .copy-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px;
+            transition: transform 0.2s;
+        }
+
+        .copy-btn:hover {
+            transform: scale(1.2);
+        }
+
+        .warning-box {
+            background: #fef3c7;
+            border: 1px solid #fbbf24;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+            font-size: 13px;
+            color: #92400e;
+        }
+
+        .warning-box strong {
+            display: block;
+            margin-bottom: 8px;
+        }
+
+        .secret-display {
+            background: #1f2937;
+            color: #10b981;
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            word-break: break-all;
+            margin: 16px 0;
+            display: none;
+        }
+
+        .loading {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #f3f4f6;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .refresh-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px;
+            transition: transform 0.3s;
+        }
+
+        .refresh-btn:hover {
+            transform: rotate(180deg);
+        }
+
+        .refresh-btn.spinning {
+            animation: spin 0.6s linear infinite;
+        }
+
+        .not-logged-in {
+            text-align: center;
+            padding: 60px 20px;
+        }
+
+        .not-logged-in h2 {
+            color: #1f2937;
+            margin-bottom: 16px;
+        }
+
+        .not-logged-in p {
+            color: #6b7280;
+            margin-bottom: 24px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .badge-success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .badge-info {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 20px;
+            background: #f3f4f6;
+            padding: 4px;
+            border-radius: 8px;
+        }
+
+        .tab {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            background: transparent;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            color: #6b7280;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            background: white;
+            color: #667eea;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .import-tab-content {
+            display: none;
+        }
+
+        .import-tab-content.active {
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>⚡ Wallet Management</h1>
+            <p>Advanced wallet controls and insights</p>
+        </div>
+
+        <!-- Not Logged In State -->
+        <div id="not-logged-in" class="card not-logged-in" style="display: none;">
+            <h2>🔐 No Wallet Connected</h2>
+            <!-- <p>Create a new wallet or import an existing one to get started.</p>
+            <div style="display: flex; gap: 12px; justify-content: center; margin-top: 20px;">
+                <button class="btn btn-primary" onclick="window.close()">Create Wallet (Popup)</button>
+                <button class="btn btn-secondary" id="show-import-wallet">Import Wallet</button>
+            </div> -->
+        </div>
+
+        <!-- <div id="import-wallet-modal" class="card" style="display: none;">
+            ... (Import Wallet Modal content) ...
+        </div> -->
+
+        <!-- Wallet Connected State -->
+        <div id="wallet-content" style="display: none;">
+            <!-- Live Balances -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">
+                        💰 Live Balances
+                        <span class="badge badge-success">RPC</span>
+                    </div>
+                    <button class="refresh-btn" id="refresh-balances" title="Refresh Balances">🔄</button>
+                </div>
+                <div class="balance-grid">
+                    <div class="balance-item">
+                        <div class="balance-label">🟡 BNB</div>
+                        <div class="balance-value" id="balance-bnb">...</div>
+                        <div class="balance-usd" id="balance-bnb-usd">$0.00</div>
+                    </div>
+                    <div class="balance-item">
+                        <div class="balance-label">💵 USDT</div>
+                        <div class="balance-value" id="balance-usdt">...</div>
+                        <div class="balance-usd">$<span id="balance-usdt-usd">0.00</span></div>
+                    </div>
+                    <div class="balance-item">
+                        <div class="balance-label">⚡ CLIPX</div>
+                        <div class="balance-value" id="balance-clipx">...</div>
+                        <div class="balance-usd" id="balance-clipx-usd">$0.00</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Wallet Info -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">📋 Wallet Information</div>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Wallet Address</span>
+                    <span class="info-value">
+                        <span id="wallet-address">...</span>
+                        <button class="copy-btn" id="copy-address" title="Copy Address">📋</button>
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Wallet Type</span>
+                    <span class="info-value">
+                        <span class="badge badge-info">Native Wallet</span>
+                    </span>
+                </div>
+                <div class="info-row">
+                    <span class="info-label">Network</span>
+                    <span class="info-value">BNB Smart Chain (BSC)</span>
+                </div>
+            </div>
+
+            <!-- Private Key Export -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">🔑 Private Key Export</div>
+                </div>
+
+                <div class="warning-box">
+                    <strong>⚠️ Security Warning</strong>
+                    Never share your private key with anyone. Anyone with access to your private key can steal all your
+                    funds. Only export if you know what you're doing.
+                </div>
+
+                <button class="btn btn-secondary" id="show-private-key">
+                    👁️ Show Private Key
+                </button>
+
+                <div class="secret-display" id="private-key-display"></div>
+
+                <div style="margin-top: 16px; display: flex; gap: 12px;">
+                    <button class="btn btn-secondary btn-small" id="copy-private-key" style="display: none;">
+                        📋 Copy Private Key
+                    </button>
+                    <button class="btn btn-secondary btn-small" id="hide-private-key" style="display: none;">
+                        🙈 Hide
+                    </button>
+                </div>
+            </div>
+
+            <!-- Danger Zone -->
+            <div class="card">
+                <div class="card-header">
+                    <div class="card-title">⚠️ Danger Zone</div>
+                </div>
+                <p style="font-size: 13px; color: #6b7280; margin-bottom: 16px;">
+                    These actions are irreversible. Make sure you have backed up your Secret Phrase before proceeding.
+                </p>
+                <button class="btn btn-danger" id="logout-wallet">
+                    🚪 Log Out / Remove Wallet
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Password Modal for Private Key -->
+    <div id="password-modal"
+        style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0, 0, 0, 0.7); z-index: 1000; align-items: center; justify-content: center;">
+        <div
+            style="background: white; border-radius: 16px; padding: 32px; max-width: 400px; width: 90%; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);">
+            <h2 style="font-size: 20px; color: #1f2937; margin-bottom: 8px;">🔐 Enter Password</h2>
+            <p style="font-size: 14px; color: #6b7280; margin-bottom: 24px;">Enter your wallet password to view the
+                private key</p>
+
+            <div style="margin-bottom: 20px;">
+                <label
+                    style="display: block; font-size: 13px; font-weight: 600; color: #374151; margin-bottom: 8px;">Password</label>
+                <input type="password" id="modal-password-input"
+                    style="width: 100%; padding: 12px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 14px;"
+                    placeholder="Enter your password">
+            </div>
+
+            <div id="modal-password-error" style="color: #ef4444; font-size: 13px; margin-bottom: 12px; display: none;">
+            </div>
+
+            <div style="display: flex; gap: 12px;">
+                <button class="btn btn-secondary" id="modal-password-cancel" style="flex: 1;">
+                    Cancel
+                </button>
+                <button class="btn btn-primary" id="modal-password-confirm" style="flex: 1;">
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="../lib/ethers.js"></script>
+    <script src="options.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Binance Web3</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { 
+            width: 100%; 
+            height: 100%; 
+            background: #0b0e11; 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #F0B90B;
+            font-size: 14px;
+            text-align: center;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #1e2329;
+            border-top-color: #F0B90B;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .fallback {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #848e9c;
+            display: none;
+        }
+        .fallback-btn {
+            display: inline-block;
+            margin-top: 16px;
+            padding: 12px 24px;
+            background: #F0B90B;
+            color: #0b0e11;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        .fallback-btn:hover {
+            background: #d4a50a;
+        }
+        #ext-link {
+            position: fixed;
+            bottom: 12px;
+            right: 12px;
+            color: #848e9c;
+            font-size: 11px;
+            text-decoration: none;
+            z-index: 1000;
+            background: rgba(11, 14, 17, 0.9);
+            padding: 6px 10px;
+            border-radius: 4px;
+        }
+        #ext-link:hover { color: #F0B90B; }
+    </style>
+</head>
+<body>
+    <div class="loading">
+        <div class="spinner"></div>
+        Loading Binance Web3...
+    </div>
+    <div class="fallback" id="fallback">
+        <div style="font-size: 48px; margin-bottom: 16px;">🔒</div>
+        <div style="font-size: 16px; color: #F0B90B; margin-bottom: 8px;">Binance Web3</div>
+        <div style="font-size: 13px; max-width: 280px;">This content cannot be embedded. Click below to open in a new tab.</div>
+        <a id="fallback-btn" class="fallback-btn" target="_blank">Open Binance Web3 →</a>
+    </div>
+    <a id="ext-link" href="#" target="_blank">Open in New Tab ↗</a>
+    <script src="binance_embed.js"></script>
+</body>
+</html>
