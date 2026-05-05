@@ -1,30 +1,70 @@
 // ClipX Tipping Assistant - Popup Script
 
 const CLIPX_PRODUCTION_API = 'https://clipx.app';
+const CLIPX_DEV_API = 'http://localhost:3000';
 let API_BASE = CLIPX_PRODUCTION_API;
+let _clipxDevMode = false;
 
-function clipxNormalizeApiBase(v) {
-    if (typeof v !== 'string' || !v.trim()) return CLIPX_PRODUCTION_API;
+function clipxNormalizeApiBase(v, devMode) {
+    const fallback = devMode ? CLIPX_DEV_API : CLIPX_PRODUCTION_API;
+    if (typeof v !== 'string' || !v.trim()) return fallback;
     try {
         const u = new URL(v);
-        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return CLIPX_PRODUCTION_API;
-        return v.replace(/\/$/, '') || CLIPX_PRODUCTION_API;
+        if (!devMode && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return CLIPX_PRODUCTION_API;
+        return v.replace(/\/$/, '') || fallback;
     } catch {
-        return CLIPX_PRODUCTION_API;
+        return fallback;
     }
 }
 
-chrome.storage.local.get(['apiBase'], (result) => {
-    const next = clipxNormalizeApiBase(result.apiBase);
+function clipxStoredApiLooksLocal(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return true;
+    try {
+        const u = new URL(raw.trim());
+        return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+    } catch {
+        return false;
+    }
+}
+
+chrome.storage.local.get(['apiBase', 'clipxDevMode', 'clipxProdApiDefaultApplied'], (result) => {
+    let dev = result.clipxDevMode === true;
+    let raw = typeof result.apiBase === 'string' ? result.apiBase.trim() : '';
+
+    let didMigrateLocalDefault = false;
+    if (!result.clipxProdApiDefaultApplied && clipxStoredApiLooksLocal(raw)) {
+        dev = false;
+        raw = CLIPX_PRODUCTION_API;
+        didMigrateLocalDefault = true;
+        chrome.storage.local.set({
+            apiBase: CLIPX_PRODUCTION_API,
+            clipxDevMode: false,
+            clipxProdApiDefaultApplied: true,
+        });
+    } else if (!result.clipxProdApiDefaultApplied) {
+        chrome.storage.local.set({ clipxProdApiDefaultApplied: true });
+    }
+
+    _clipxDevMode = dev;
+    const next = clipxNormalizeApiBase(raw || (dev ? CLIPX_DEV_API : CLIPX_PRODUCTION_API), dev);
     API_BASE = next;
-    if (result.apiBase !== next) chrome.storage.local.set({ apiBase: next });
-    console.log('[ClipX Popup] API_BASE initialized to:', API_BASE);
+
+    if (!didMigrateLocalDefault) {
+        const patch = {};
+        if (result.apiBase !== next) patch.apiBase = next;
+        if (result.clipxDevMode !== dev) patch.clipxDevMode = dev;
+        if (Object.keys(patch).length) chrome.storage.local.set(patch);
+    }
+
+    console.log('[ClipX Popup] API_BASE initialized to:', API_BASE, _clipxDevMode ? '(dev)' : '');
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !changes.apiBase) return;
-    const v = changes.apiBase.newValue;
-    API_BASE = clipxNormalizeApiBase(typeof v === 'string' ? v : '');
+    if (areaName !== 'local') return;
+    if (changes.clipxDevMode) _clipxDevMode = changes.clipxDevMode.newValue === true;
+    if (!changes.apiBase && !changes.clipxDevMode) return;
+    const v = changes.apiBase ? changes.apiBase.newValue : API_BASE;
+    API_BASE = clipxNormalizeApiBase(typeof v === 'string' ? v : '', _clipxDevMode);
     console.log('[ClipX Popup] API_BASE updated to:', API_BASE);
 });
 
@@ -51,6 +91,7 @@ const txListContainer = document.getElementById('tx-list-container');
 const settingsBtn = document.getElementById('settingsBtn');
 const walletBalanceSection = document.getElementById('wallet-balance');
 const balBnb = document.getElementById('bal-bnb');
+const balSol = document.getElementById('bal-sol');
 const balClipx = document.getElementById('bal-clipx');
 const refreshBalanceBtn = document.getElementById('refreshBalance');
 const tradeBalBnb = document.getElementById('trade-bal-bnb');
@@ -98,6 +139,31 @@ let currentUser = null;
 const historyList = document.getElementById('history-list');
 const historyEmpty = document.getElementById('history-empty');
 const historyLoading = document.getElementById('history-loading');
+
+// Native wallet panel elements
+const nativeWalletStatus = document.getElementById('native-wallet-status');
+const nativeBscAddress = document.getElementById('native-bsc-address');
+const nativeSolAddress = document.getElementById('native-sol-address');
+const nativeWalletCreateBox = document.getElementById('native-wallet-create-box');
+const nativeWalletActions = document.getElementById('native-wallet-actions');
+const nativeWalletMessage = document.getElementById('native-wallet-message');
+const nativeWalletPassword = document.getElementById('native-wallet-password');
+const nativeCreateBothBtn = document.getElementById('native-create-both-btn');
+const nativeWalletRefreshBtn = document.getElementById('native-wallet-refresh-btn');
+const nativeShowImportBtn = document.getElementById('native-show-import-btn');
+const nativeShowExportBtn = document.getElementById('native-show-export-btn');
+const nativeWalletImportBox = document.getElementById('native-wallet-import-box');
+const nativeWalletExportBox = document.getElementById('native-wallet-export-box');
+const nativeImportBscKey = document.getElementById('native-import-bsc-key');
+const nativeImportSolKey = document.getElementById('native-import-sol-key');
+const nativeImportPassword = document.getElementById('native-import-password');
+const nativeImportConfirmBtn = document.getElementById('native-import-confirm-btn');
+const nativeCopyBscBtn = document.getElementById('native-copy-bsc-btn');
+const nativeCopySolBtn = document.getElementById('native-copy-sol-btn');
+const nativeExportConfirmBtn = document.getElementById('native-export-confirm-btn');
+const nativeExportBscKey = document.getElementById('native-export-bsc-key');
+const nativeExportSolKey = document.getElementById('native-export-sol-key');
+const nativeHideExportBtn = document.getElementById('native-hide-export-btn');
 
 // Initialize popup
 document.addEventListener('DOMContentLoaded', async () => {
@@ -192,8 +258,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Default to Categories tab if not logged in
             // check if we are in a sub-page or just opened
             const activeTab = document.querySelector('.tab-btn.active');
-            if (!activeTab || activeTab.getAttribute('data-tab') === 'send-tip') {
-                // Switch to Categories by default for non-logged in users
+            const activeTabName = activeTab ? activeTab.getAttribute('data-tab') : '';
+            if (!activeTab || activeTabName === 'send-tip' || activeTabName === 'watchlist') {
                 const catBtn = document.querySelector('.tab-btn[data-tab="categories"]');
                 if (catBtn) catBtn.click();
             }
@@ -320,6 +386,271 @@ function showSuccessNotification(message, txHash) {
     setTimeout(() => notification.remove(), 5000);
 }
 
+function sendRuntimeMessage(message) {
+    return new Promise((resolve) => {
+        chrome.runtime.sendMessage(message, (response) => resolve(response));
+    });
+}
+
+function shortAddress(address) {
+    if (!address) return 'Not created';
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function setNativeWalletMessage(message, type = 'info') {
+    if (!nativeWalletMessage) return;
+    const colors = {
+        info: 'var(--text-muted)',
+        success: '#6ee7b7',
+        error: '#fca5a5',
+        warn: '#fbbf24'
+    };
+    nativeWalletMessage.textContent = message || '';
+    nativeWalletMessage.style.color = colors[type] || colors.info;
+}
+
+function setButtonBusy(btn, isBusy, busyText) {
+    if (!btn) return () => { };
+    const originalText = btn.textContent;
+    btn.disabled = isBusy;
+    if (isBusy && busyText) btn.textContent = busyText;
+    return () => {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    };
+}
+
+async function getNativeWalletStateForPopup() {
+    const stored = await chrome.storage.local.get(['nativeWallet', 'walletPrivateKey', 'solWallet', 'authToken', 'userAddress']);
+    return {
+        bscAddress: stored.nativeWallet?.address || (stored.userAddress && stored.userAddress.startsWith('0x') ? stored.userAddress : ''),
+        solAddress: stored.solWallet?.address || '',
+        hasBscKey: !!(stored.walletPrivateKey || stored.nativeWallet?.privateKey || stored.nativeWallet?.encrypted),
+        hasSolKey: !!stored.solWallet?.privateKey
+    };
+}
+
+async function refreshNativeWalletPanel() {
+    const state = await getNativeWalletStateForPopup();
+    const bscCard = document.getElementById('native-bsc-card');
+    const solCard = document.getElementById('native-sol-card');
+    if (nativeBscAddress) {
+        nativeBscAddress.textContent = state.bscAddress ? shortAddress(state.bscAddress) : 'Not created';
+        nativeBscAddress.title = state.bscAddress || '';
+    }
+    if (nativeSolAddress) {
+        nativeSolAddress.textContent = state.solAddress ? shortAddress(state.solAddress) : 'Not created';
+        nativeSolAddress.title = state.solAddress || '';
+    }
+    if (bscCard) bscCard.classList.toggle('is-ready', !!state.bscAddress);
+    if (solCard) solCard.classList.toggle('is-ready', !!state.solAddress);
+
+    const hasBoth = !!(state.bscAddress && state.solAddress);
+    const hasAny = !!(state.bscAddress || state.solAddress);
+    if (nativeWalletStatus) {
+        nativeWalletStatus.textContent = hasBoth
+            ? 'Ready for native BSC and Solana one-click trading.'
+            : hasAny
+                ? 'One chain is ready. Create or import the missing wallet before funding.'
+                : 'Create one secure wallet set for BSC and Solana one-click trades.';
+        nativeWalletStatus.style.color = hasBoth ? '#6ee7b7' : 'var(--text-muted)';
+    }
+    if (nativeWalletActions) nativeWalletActions.style.display = hasAny ? 'block' : 'none';
+    if (nativeWalletCreateBox) nativeWalletCreateBox.style.display = hasBoth ? 'none' : 'block';
+    if (nativeCreateBothBtn) nativeCreateBothBtn.textContent = hasAny ? 'Create Missing Wallet' : 'Create BSC + Solana Wallets';
+    if (nativeWalletPassword) nativeWalletPassword.style.display = state.bscAddress ? 'none' : 'block';
+    const passwordLabel = nativeWalletPassword?.closest('.input-group')?.querySelector('.input-label');
+    if (passwordLabel) passwordLabel.style.display = state.bscAddress ? 'none' : 'block';
+    return state;
+}
+
+async function copyTextWithFeedback(text, btn) {
+    if (!text) return;
+    await navigator.clipboard.writeText(text);
+    const originalText = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = originalText; }, 1400);
+}
+
+function clearExportedKeys() {
+    [nativeExportBscKey, nativeExportSolKey].forEach((el) => {
+        if (!el) return;
+        el.textContent = '';
+        el.style.display = 'none';
+        el.onclick = null;
+    });
+}
+
+function wireSecretCopy(el, label, value) {
+    if (!el || !value) return;
+    el.textContent = `${label}: ${value}`;
+    el.style.display = 'block';
+    el.title = 'Click to copy';
+    el.onclick = async () => {
+        await navigator.clipboard.writeText(value);
+        setNativeWalletMessage(`${label} copied. Clear your clipboard after backup.`, 'warn');
+    };
+}
+
+async function initNativeWalletPanel() {
+    await refreshNativeWalletPanel();
+
+    if (nativeWalletRefreshBtn) {
+        nativeWalletRefreshBtn.onclick = refreshNativeWalletPanel;
+    }
+
+    if (nativeCreateBothBtn) {
+        nativeCreateBothBtn.onclick = async () => {
+            const state = await getNativeWalletStateForPopup();
+            const needsBsc = !state.bscAddress;
+            const needsSol = !state.solAddress;
+            const password = nativeWalletPassword ? nativeWalletPassword.value.trim() : '';
+            if (needsBsc && password.length < 8) {
+                setNativeWalletMessage('Use at least 8 characters for the BSC backup password.', 'error');
+                return;
+            }
+
+            const done = setButtonBusy(nativeCreateBothBtn, true, 'Creating...');
+            setNativeWalletMessage('Creating wallet keys locally...', 'info');
+            try {
+                let bscAddress = state.bscAddress;
+                let solAddress = state.solAddress;
+                if (needsBsc) {
+                    const generated = await sendRuntimeMessage({ action: 'clipxGenerateNativeWallet' });
+                    if (!generated?.success) throw new Error(generated?.error || 'Failed to create BSC wallet');
+                    const finalized = await sendRuntimeMessage({
+                        action: 'clipxFinalizeNativeWallet',
+                        sessionId: generated.sessionId,
+                        password
+                    });
+                    if (!finalized?.success) throw new Error(finalized?.error || 'Failed to save BSC wallet');
+                    bscAddress = finalized.address || generated.address;
+                }
+                if (needsSol) {
+                    const sol = await sendRuntimeMessage({ action: 'clipxGenerateSolWallet' });
+                    if (!sol?.success) throw new Error(sol?.error || 'Failed to create Solana wallet');
+                    solAddress = sol.address;
+                }
+                if (nativeWalletPassword) nativeWalletPassword.value = '';
+                await refreshNativeWalletPanel();
+                loadSolBalance();
+                loadWalletAssets();
+                setNativeWalletMessage(`Wallet ready. BSC ${shortAddress(bscAddress)} / SOL ${shortAddress(solAddress)}. Export and back up keys before funding.`, 'success');
+            } catch (e) {
+                setNativeWalletMessage(e.message || String(e), 'error');
+            } finally {
+                done();
+            }
+        };
+    }
+
+    if (nativeShowImportBtn && nativeWalletImportBox) {
+        nativeShowImportBtn.onclick = () => {
+            nativeWalletImportBox.style.display = nativeWalletImportBox.style.display === 'none' ? 'block' : 'none';
+            if (nativeWalletExportBox) nativeWalletExportBox.style.display = 'none';
+            clearExportedKeys();
+        };
+    }
+
+    if (nativeShowExportBtn && nativeWalletExportBox) {
+        nativeShowExportBtn.onclick = () => {
+            nativeWalletExportBox.style.display = nativeWalletExportBox.style.display === 'none' ? 'block' : 'none';
+            if (nativeWalletImportBox) nativeWalletImportBox.style.display = 'none';
+            clearExportedKeys();
+        };
+    }
+
+    if (nativeImportConfirmBtn) {
+        nativeImportConfirmBtn.onclick = async () => {
+            const bscKey = nativeImportBscKey ? nativeImportBscKey.value.trim() : '';
+            const solKey = nativeImportSolKey ? nativeImportSolKey.value.trim() : '';
+            const password = nativeImportPassword ? nativeImportPassword.value.trim() : '';
+            if (!bscKey && !solKey) {
+                setNativeWalletMessage('Paste a BSC key/phrase, a Solana key, or both.', 'error');
+                return;
+            }
+            if (bscKey && password.length < 8) {
+                setNativeWalletMessage('Use at least 8 characters to protect the imported BSC backup.', 'error');
+                return;
+            }
+
+            const done = setButtonBusy(nativeImportConfirmBtn, true, 'Importing...');
+            try {
+                if (bscKey) {
+                    const bsc = await sendRuntimeMessage({
+                        action: 'clipxImportNativeWallet',
+                        privateKey: bscKey,
+                        password
+                    });
+                    if (!bsc?.success) throw new Error(bsc?.error || 'BSC import failed');
+                }
+                if (solKey) {
+                    const sol = await sendRuntimeMessage({
+                        action: 'clipxImportSolWallet',
+                        privateKey: solKey
+                    });
+                    if (!sol?.success) throw new Error(sol?.error || 'Solana import failed');
+                }
+                if (nativeImportBscKey) nativeImportBscKey.value = '';
+                if (nativeImportSolKey) nativeImportSolKey.value = '';
+                if (nativeImportPassword) nativeImportPassword.value = '';
+                if (nativeWalletImportBox) nativeWalletImportBox.style.display = 'none';
+                await refreshNativeWalletPanel();
+                loadSolBalance();
+                loadWalletAssets();
+                setNativeWalletMessage('Wallet import complete.', 'success');
+            } catch (e) {
+                setNativeWalletMessage(e.message || String(e), 'error');
+            } finally {
+                done();
+            }
+        };
+    }
+
+    if (nativeCopyBscBtn) {
+        nativeCopyBscBtn.onclick = async () => {
+            const state = await getNativeWalletStateForPopup();
+            copyTextWithFeedback(state.bscAddress, nativeCopyBscBtn);
+        };
+    }
+
+    if (nativeCopySolBtn) {
+        nativeCopySolBtn.onclick = async () => {
+            const state = await getNativeWalletStateForPopup();
+            copyTextWithFeedback(state.solAddress, nativeCopySolBtn);
+        };
+    }
+
+    if (nativeExportConfirmBtn) {
+        nativeExportConfirmBtn.onclick = async () => {
+            const done = setButtonBusy(nativeExportConfirmBtn, true, 'Revealing...');
+            clearExportedKeys();
+            try {
+                const [bsc, sol] = await Promise.all([
+                    sendRuntimeMessage({ action: 'clipxExportNativeWallet' }),
+                    sendRuntimeMessage({ action: 'clipxExportSolWallet' })
+                ]);
+                if (bsc?.success) wireSecretCopy(nativeExportBscKey, 'BSC private key', bsc.privateKey);
+                if (sol?.success) wireSecretCopy(nativeExportSolKey, 'Solana private key', sol.privateKey);
+                if (!bsc?.success && !sol?.success) throw new Error('No exportable wallet keys found.');
+                setNativeWalletMessage('Keys revealed. Click a key to copy, then hide this section.', 'warn');
+            } catch (e) {
+                setNativeWalletMessage(e.message || String(e), 'error');
+            } finally {
+                done();
+            }
+        };
+    }
+
+    if (nativeHideExportBtn) {
+        nativeHideExportBtn.onclick = () => {
+            clearExportedKeys();
+            if (nativeWalletExportBox) nativeWalletExportBox.style.display = 'none';
+            setNativeWalletMessage('Private keys hidden.', 'info');
+        };
+    }
+}
+
 // Save Send Transaction to Local History
 async function saveSendToHistory(to, amount, tokenAddress, txHash) {
     try {
@@ -395,7 +726,11 @@ async function loadTradeHistory() {
             allTxs.forEach((tx) => {
                 const row = document.createElement('div');
                 row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 12px;margin-bottom:6px;border-radius:10px;background:var(--bg-input);cursor:pointer;';
-                row.onclick = () => window.open(`https://bscscan.com/tx/${tx.txHash || tx.hash}`, '_blank');
+                const txChain = tx.chain || 'bnb';
+                const txExplorer = txChain === 'sol'
+                    ? `https://solscan.io/tx/${tx.txHash || tx.hash}`
+                    : `https://bscscan.com/tx/${tx.txHash || tx.hash}`;
+                row.onclick = () => window.open(txExplorer, '_blank');
 
                 const left = document.createElement('div');
                 left.style.cssText = 'display:flex;flex-direction:column;font-size:11px;';
@@ -469,9 +804,10 @@ if (sendBtnInline && sendRecipientInline && sendTokenInline && sendAmountInline)
         const amount = sendAmountInline.value.trim();
         const tokenAddress = sendTokenInline.value;
 
-        // Basic validation
-        if (!to || to.length !== 42 || !to.startsWith('0x')) {
-            alert('Invalid Address. Please enter a valid BSC address (0x...)');
+        const isEvmAddr = to && to.length === 42 && to.startsWith('0x');
+        const isSolAddr = to && to.length >= 32 && to.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(to);
+        if (!isEvmAddr && !isSolAddr) {
+            alert('Invalid Address. Please enter a valid BSC (0x...) or Solana address.');
             return;
         }
         if (!amount || parseFloat(amount) <= 0) {
@@ -521,7 +857,7 @@ tabBtns.forEach(btn => {
         const tabId = btn.getAttribute('data-tab');
 
         // Protected Tabs Check
-        const protectedTabs = ['send-tip', 'watchlist', 'history', 'wallet-control'];
+            const protectedTabs = ['history'];
         if (protectedTabs.includes(tabId)) {
             const stored = await chrome.storage.local.get(['authToken']);
             if (!stored.authToken) {
@@ -977,6 +1313,11 @@ if (tradeSettingsBtn) {
             if (showTipsToggle) {
                 showTipsToggle.checked = result.showTipsButtons !== false;
             }
+
+            chrome.storage.local.get(['useDashboardWalletSwap'], (r) => {
+                const dashSwap = document.getElementById('useDashboardWalletSwapToggle');
+                if (dashSwap) dashSwap.checked = r.useDashboardWalletSwap === true;
+            });
         });
     });
 }
@@ -1153,8 +1494,10 @@ if (watchlistAddBtn) {
         const addr = (watchlistAddressInput?.value || '').trim();
         const label = (watchlistLabelInput?.value || '').trim();
 
-        if (!addr || !addr.startsWith('0x') || addr.length !== 42) {
-            alert('Please enter a valid BSC contract address (0x...)');
+        const isEvm = addr && addr.startsWith('0x') && addr.length === 42;
+        const isSolana = addr && addr.length >= 32 && addr.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(addr);
+        if (!isEvm && !isSolana) {
+            alert('Please enter a valid BSC (0x...) or Solana contract address.');
             return;
         }
 
@@ -1306,10 +1649,18 @@ if (saveTradeSettingsBtn) {
         const labelEffectSelect = document.getElementById('labelEffectStyle');
         const labelEffectStyle = labelEffectSelect ? labelEffectSelect.value : 'gradient';
 
+        const tokenPillStyleSelect = document.getElementById('tokenPillStyle');
+        const tokenPillStyle = tokenPillStyleSelect ? tokenPillStyleSelect.value : 'market';
+
+        const dashboardSwapToggle = document.getElementById('useDashboardWalletSwapToggle');
+        const useDashboardWalletSwap = dashboardSwapToggle ? dashboardSwapToggle.checked : false;
+
         chrome.storage.local.set({
             showTipsButtons: showTipsButtons,
             showMarketInsight: showMarketInsight,
-            labelEffectStyle: labelEffectStyle
+            labelEffectStyle: labelEffectStyle,
+            tokenPillStyle: tokenPillStyle,
+            useDashboardWalletSwap: useDashboardWalletSwap,
         }, () => {
             // Close modal
             tradeSettingsModal.style.display = 'none';
@@ -1321,7 +1672,8 @@ if (saveTradeSettingsBtn) {
                         action: 'refreshSettings',
                         showTipsButtons: showTipsButtons,
                         showMarketInsight: showMarketInsight,
-                        labelEffectStyle: labelEffectStyle
+                        labelEffectStyle: labelEffectStyle,
+                        tokenPillStyle: tokenPillStyle
                     });
                 }
             });
@@ -1414,6 +1766,23 @@ if (settingsBtn) {
                         labelSelect.value = r.labelEffectStyle || 'gradient';
                     }
                 });
+
+                chrome.storage.local.get(['tokenPillStyle'], (r) => {
+                    const tokenPillSelect = document.getElementById('tokenPillStyle');
+                    if (tokenPillSelect) {
+                        const stored = r.tokenPillStyle;
+                        const normalized = (stored === 'classic' || stored === 'clean') ? 'market'
+                            : stored === 'neon' ? 'chain'
+                            : stored === 'compact' ? 'micro'
+                            : (['market', 'chain', 'micro'].includes(stored) ? stored : 'market');
+                        tokenPillSelect.value = normalized;
+                    }
+                });
+
+                chrome.storage.local.get(['useDashboardWalletSwap'], (r) => {
+                    const dashSwap = document.getElementById('useDashboardWalletSwapToggle');
+                    if (dashSwap) dashSwap.checked = r.useDashboardWalletSwap === true;
+                });
             });
         }
     });
@@ -1480,17 +1849,30 @@ function renderBalance(data) {
     if (balBnb) balBnb.textContent = parseFloat(data.balance || 0).toFixed(4);
     if (balClipx) balClipx.textContent = parseFloat(data.clipxBalance || 0).toFixed(2);
     if (tradeBalBnb) tradeBalBnb.textContent = parseFloat(data.balance || 0).toFixed(4);
+    if (data.solBalance != null && balSol) balSol.textContent = parseFloat(data.solBalance || 0).toFixed(4);
+}
+
+function loadSolBalance() {
+    chrome.runtime.sendMessage({ action: 'getSolBalance' }, (resp) => {
+        if (resp && resp.success && balSol) {
+            balSol.textContent = parseFloat(resp.balance || 0).toFixed(4);
+        } else if (balSol) {
+            balSol.textContent = '—';
+        }
+    });
 }
 
 async function loadWalletBalance(token) {
     try {
+        // Always try loading SOL balance in parallel
+        loadSolBalance();
+
         // Native Wallet Support
         if (token === 'native-wallet') {
             const stored = await chrome.storage.local.get('nativeWallet');
             if (stored.nativeWallet && stored.nativeWallet.address) {
                 const walletAddress = stored.nativeWallet.address;
 
-                // Fetch BNB balance
                 chrome.runtime.sendMessage({
                     action: 'getBnbBalance',
                     walletAddress: walletAddress
@@ -1500,7 +1882,6 @@ async function loadWalletBalance(token) {
                         clipxBalance: 0
                     };
 
-                    // Fetch CLIPX token balance
                     const CLIPX_ADDRESS = '0xc269d59a0d608ea0bd672f2f4616c372d8554444';
                     chrome.runtime.sendMessage({
                         action: 'getTokenBalance',
@@ -1527,14 +1908,12 @@ async function loadWalletBalance(token) {
 
         const data = await response.json();
 
-        // Cache the fresh data
         chrome.storage.local.set({ cachedBalance: data });
 
         renderBalance(data);
 
     } catch (e) {
         console.error('Failed to load balance', e);
-        // Don't show error in UI if we have cached data, just log it
         if (!balBnb.textContent || balBnb.textContent === '...') {
             if (balBnb) balBnb.textContent = 'Error';
             if (balClipx) balClipx.textContent = 'Error';
@@ -1577,9 +1956,23 @@ function renderTransactions(data, currentUserId) {
 
 async function loadRecentTransactions(token) {
     try {
+        // `/api/transactions` is ClipX social tip history — needs a real session token (e.g. extension token from the dashboard).
+        // Native-only traders use on-chain swaps; never send placeholders like `native-wallet` here (that causes 401 noise).
+        if (!token || token === 'native-wallet') {
+            return;
+        }
+
         const response = await fetch(`${API_BASE}/api/transactions`, {
             headers: { 'Authorization': `Bearer ${token}` }
         });
+
+        if (!response.ok) {
+            if (response.status === 401) {
+                console.warn('[ClipX] Tip history: session expired. Open ClipX while logged in so the extension can sync a fresh token.');
+            }
+            return;
+        }
+
         const data = await response.json();
 
         if (data.transactions) {
@@ -1795,11 +2188,12 @@ const noNativeWalletUi = document.getElementById('no-native-wallet-ui');
 
 // Check wallet state on load (Wallet tab supports native wallet and ClipX web wallet)
 chrome.storage.local.get(['authToken', 'nativeWallet', 'userAddress', 'webUserAddress'], (result) => {
-    const hasNative = result.authToken === 'native-wallet' && result.nativeWallet && result.nativeWallet.address;
+    const hasNative = !!(result.nativeWallet && result.nativeWallet.address);
+    const isClipxWebSession = !!(result.authToken && result.authToken !== 'native-wallet');
 
     // Get the web wallet address, ensuring it's a valid 0x address
     const webAddr = result.userAddress || result.webUserAddress;
-    const hasClipxWallet = result.authToken && result.authToken !== 'native-wallet' && webAddr && webAddr.startsWith('0x');
+    const hasClipxWallet = isClipxWebSession && webAddr && webAddr.startsWith('0x');
 
     // If we have some wallet (native or ClipX), show the main wallet UI
     if (hasNative || hasClipxWallet) {
@@ -1828,10 +2222,14 @@ chrome.storage.local.get(['authToken', 'nativeWallet', 'userAddress', 'webUserAd
         }
         if (statusText) statusText.textContent = 'Active';
         if (status) status.className = 'status-badge registered';
+        if (logoutBtn) {
+            logoutBtn.style.display = isClipxWebSession ? 'none' : 'block';
+        }
     } else {
         // No wallet bound; show the simpler Twitter/logout UI
         if (nativeWalletUi) nativeWalletUi.style.display = 'none';
         if (noNativeWalletUi) noNativeWalletUi.style.display = 'block';
+        if (twitterLogoutBtn) twitterLogoutBtn.style.display = 'none';
     }
 });
 
@@ -1872,13 +2270,20 @@ if (cancelLogoutBtn) {
 }
 
 if (confirmLogoutBtn) {
-    confirmLogoutBtn.addEventListener('click', () => {
+    confirmLogoutBtn.addEventListener('click', async () => {
         confirmLogoutBtn.disabled = true;
-        confirmLogoutBtn.textContent = 'Logging out...';
+        confirmLogoutBtn.textContent = 'Removing...';
 
-        chrome.storage.local.remove(['authToken', 'nativeWallet', 'userAddress', 'cachedBalance', 'cachedTransactions'], () => {
+        const stored = await chrome.storage.local.get(['authToken']);
+        const keysToRemove = ['nativeWallet', 'walletPrivateKey', 'solWallet', 'cachedBalance', 'cachedTransactions'];
+        if (stored.authToken === 'native-wallet') {
+            keysToRemove.push('authToken', 'userAddress');
+        }
+
+        chrome.storage.local.remove(keysToRemove, () => {
             // Send lock message to background to clear memory
             chrome.runtime.sendMessage({ action: 'lockWallet' });
+            chrome.runtime.sendMessage({ action: 'lockSolWallet' });
             window.close();
         });
     });
@@ -1888,14 +2293,7 @@ if (logoutBtn) {
     logoutBtn.addEventListener('click', showLogoutModal);
 }
 
-if (twitterLogoutBtn) {
-    twitterLogoutBtn.addEventListener('click', () => {
-        // For Twitter logout, we can use the same modal or a simpler one.
-        // For now, let's use the same one but maybe change text dynamically if we wanted to be fancy.
-        // Or just keep it simple and use the same "Log Out?" modal.
-        showLogoutModal();
-    });
-}
+if (twitterLogoutBtn) twitterLogoutBtn.style.display = 'none';
 
 async function loadWalletAssets() {
     const assetsLoading = document.getElementById('assets-loading');
@@ -1911,7 +2309,7 @@ async function loadWalletAssets() {
         const stored = await chrome.storage.local.get(['authToken', 'nativeWallet', 'userAddress']);
 
         let walletAddress = null;
-        if (stored.authToken === 'native-wallet' && stored.nativeWallet && stored.nativeWallet.address) {
+        if (stored.nativeWallet && stored.nativeWallet.address) {
             walletAddress = stored.nativeWallet.address;
         } else if (stored.authToken && stored.userAddress) {
             // ClipX web wallet mode; use the bound on-chain address from syncAuth
@@ -1931,30 +2329,31 @@ async function loadWalletAssets() {
             action: 'getWalletAssets',
             walletAddress: walletAddress
         }, async (response) => {
-            // Always start with BNB as a native asset
-            const allAssets = [{
-                address: 'BNB',
-                name: 'BNB',
-                symbol: 'BNB',
-                decimals: 18,
-                isNative: true,
-                balance: 0
-            }];
+            const allAssets = [
+                { address: 'BNB', name: 'BNB', symbol: 'BNB', decimals: 18, isNative: true, balance: 0, chain: 'bnb' },
+                { address: 'SOL', name: 'Solana', symbol: 'SOL', decimals: 9, isNative: true, balance: 0, chain: 'sol' }
+            ];
 
-            // Helper to fetch BNB balance and render whatever assets we have
             const finalizeWithBnb = async (extraAssets) => {
-                chrome.runtime.sendMessage({
-                    action: 'getBnbBalance',
-                    walletAddress: walletAddress
-                }, async (bnbResponse) => {
-                    if (bnbResponse && bnbResponse.success) {
-                        allAssets[0].balance = bnbResponse.balance;
-                    }
+                // Fetch BNB and SOL balances in parallel
+                const [bnbResp, solResp] = await Promise.all([
+                    new Promise(resolve => chrome.runtime.sendMessage({ action: 'getBnbBalance', walletAddress }, resolve)),
+                    new Promise(resolve => chrome.runtime.sendMessage({ action: 'getSolBalance' }, resolve))
+                ]);
 
-                    const assets = [...allAssets, ...(extraAssets || [])];
-                    const enrichedAssets = await enrichAssetsWithPrices(assets);
-                    renderAssets(enrichedAssets);
-                });
+                if (bnbResp && bnbResp.success) allAssets[0].balance = bnbResp.balance;
+                if (solResp && solResp.success) allAssets[1].balance = solResp.balance;
+
+                // Also fetch SOL wallet assets
+                const solAssetsResp = await new Promise(resolve => chrome.runtime.sendMessage({ action: 'getSolWalletAssets' }, resolve));
+                const solTokens = (solAssetsResp && solAssetsResp.success && Array.isArray(solAssetsResp.assets))
+                    ? solAssetsResp.assets.map(a => ({ ...a, chain: 'sol' }))
+                    : [];
+
+                const bnbTokens = (extraAssets || []).map(a => ({ ...a, chain: 'bnb' }));
+                const assets = [...allAssets, ...bnbTokens, ...solTokens];
+                const enrichedAssets = await enrichAssetsWithPrices(assets);
+                renderAssets(enrichedAssets);
             };
 
             // Core tokens we always want to probe in addition to discovered ones
@@ -2021,22 +2420,48 @@ async function loadWalletAssets() {
     }
 }
 
+function clipxResolveAssetLogo(asset) {
+    if (!asset) return '';
+    if (asset.iconUrl) return asset.iconUrl;
+    const chain = asset.chain === 'sol' ? 'sol' : 'bnb';
+    if (asset.isNative) {
+        if (chain === 'sol') {
+            return 'https://dd.dexscreener.com/ds-data/tokens/solana/So11111111111111111111111111111111111111112.png';
+        }
+        return 'https://dd.dexscreener.com/ds-data/tokens/bsc/0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c.png';
+    }
+    const addr = (asset.address || '').toLowerCase();
+    if (!addr) return '';
+    if (chain === 'sol') {
+        return `https://dd.dexscreener.com/ds-data/tokens/solana/${asset.address}.png`;
+    }
+    return `https://dd.dexscreener.com/ds-data/tokens/bsc/${addr}.png`;
+}
+
 async function enrichAssetsWithPrices(assets) {
     const WBNB_ADDRESS = '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c';
+    const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 
     const tasks = assets.map(asset => {
         return new Promise(resolve => {
-            // Determine which address to use for price lookup
-            const lookupAddress = asset.isNative ? WBNB_ADDRESS : asset.address;
+            const assetChain = asset.chain === 'sol' ? 'sol' : 'bnb';
 
-            if (!lookupAddress || lookupAddress === 'BNB') {
+            let lookupAddress;
+            if (asset.isNative) {
+                lookupAddress = assetChain === 'sol' ? WSOL_MINT : WBNB_ADDRESS;
+            } else {
+                lookupAddress = asset.address;
+            }
+
+            if (!lookupAddress || lookupAddress === 'BNB' || lookupAddress === 'SOL') {
                 resolve(asset);
                 return;
             }
 
             chrome.runtime.sendMessage({
                 action: 'fetchTokenInfo',
-                address: lookupAddress
+                address: lookupAddress,
+                chain: assetChain
             }, (response) => {
                 if (!response || !response.success) {
                     resolve(asset);
@@ -2047,11 +2472,13 @@ async function enrichAssetsWithPrices(assets) {
                 const priceChange = typeof response.priceChange === 'number'
                     ? response.priceChange
                     : 0;
+                const iconUrl = response.iconUrl || asset.iconUrl || null;
 
                 resolve({
                     ...asset,
                     priceUsd,
-                    priceChange
+                    priceChange,
+                    iconUrl
                 });
             });
         });
@@ -2060,7 +2487,19 @@ async function enrichAssetsWithPrices(assets) {
     return Promise.all(tasks);
 }
 
+function formatPortfolioUnitPrice(price) {
+    if (!Number.isFinite(price) || price <= 0) return '';
+    if (price < 0.000001) return `$${price.toExponential(2)}`;
+    if (price < 0.01) return `$${price.toFixed(8)}`;
+    if (price < 1) return `$${price.toFixed(4)}`;
+    if (price < 1000) return `$${price.toFixed(2)}`;
+    return `$${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
 function renderAssets(assets) {
+    try {
+        document.dispatchEvent(new CustomEvent('clipx:assets-rendered', { detail: { assets } }));
+    } catch (e) { /* ignore */ }
     const assetsLoading = document.getElementById('assets-loading');
     const assetsList = document.getElementById('assets-list');
     const assetsEmpty = document.getElementById('assets-empty');
@@ -2102,15 +2541,19 @@ function renderAssets(assets) {
 
     if (assetsEmpty) assetsEmpty.style.display = 'none';
     if (assetsList) {
-        assetsList.style.display = 'block';
+        assetsList.style.display = 'flex';
+        assetsList.style.flexDirection = 'column';
+        assetsList.style.gap = '8px';
         assetsList.innerHTML = assets.map(asset => {
-            const icon = asset.isNative ? '🟡' : '💎';
             const balanceNum = parseFloat(asset.balance || 0);
-            const balance = balanceNum.toFixed(asset.isNative ? 4 : 2);
+            const balance = Number.isFinite(balanceNum)
+                ? balanceNum.toFixed(asset.isNative ? 4 : balanceNum < 1 ? 4 : 2)
+                : '0';
 
             const price = typeof asset.priceUsd === 'number'
                 ? asset.priceUsd
                 : asset.priceUsd ? parseFloat(asset.priceUsd) : null;
+            const unitPriceText = formatPortfolioUnitPrice(price);
 
             let valueText = '';
             if (!isNaN(balanceNum) && price && price > 0) {
@@ -2129,15 +2572,34 @@ function renderAssets(assets) {
                 changeColor = pct > 0 ? '#22c55e' : '#ef4444';
             }
 
+            const chain = asset.chain === 'sol' ? 'sol' : 'bnb';
+            const chainLabel = chain === 'sol' ? 'SOL' : 'BSC';
+            const iconClass = asset.isNative ? chain : 'token';
+            const iconText = asset.isNative
+                ? (chain === 'sol' ? 'S' : 'B')
+                : (asset.symbol || 'T').slice(0, 1).toUpperCase();
+            const safeSymbol = asset.symbol || 'Token';
+            const safeName = asset.name || (asset.isNative ? safeSymbol : 'Token asset');
+            const logoUrl = clipxResolveAssetLogo(asset);
+            const iconInner = logoUrl
+                ? `<img class="wallet-asset-img" data-fallback="${iconText.replace(/"/g, '&quot;')}" src="${logoUrl}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+                : `<span class="wallet-asset-fallback">${iconText}</span>`;
             return `
-                <div class="balance-item" style="display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;">
-                    <div style="display: flex; flex-direction: column;">
-                        <span style="font-size: 12px; color: var(--text-main); font-weight: 600;">${icon} ${asset.symbol}</span>
-                        <span style="font-size: 10px; color: var(--text-muted);">${asset.name}</span>
+                <div class="wallet-asset-row" data-chain="${chain}">
+                    <div class="wallet-asset-left">
+                        <div class="wallet-asset-icon ${iconClass}">${iconInner}</div>
+                        <div style="min-width:0;">
+                            <div class="wallet-asset-name">
+                                <span class="wallet-asset-symbol">${safeSymbol}</span>
+                                <span class="wallet-chain-badge ${chain}">${chainLabel}</span>
+                            </div>
+                            <div class="wallet-asset-meta">${safeName}</div>
+                            ${unitPriceText ? `<div class="wallet-asset-price">Live ${unitPriceText}</div>` : ''}
+                        </div>
                     </div>
-                    <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 2px;">
-                        <span style="font-weight: 600; font-size: 12px;">${balance}</span>
-                        <span style="font-size: 10px; color: var(--text-muted);">
+                    <div class="wallet-asset-right">
+                        <span class="wallet-asset-balance">${balance}</span>
+                        <span class="wallet-asset-value">
                             ${valueText}
                             ${changeText ? `<span style=\"margin-left:4px; color:${changeColor};\">${changeText}</span>` : ''}
                         </span>
@@ -2145,6 +2607,16 @@ function renderAssets(assets) {
                 </div>
             `;
         }).join('');
+
+        // Programmatic onerror fallback (CSP-safe: no inline handlers).
+        assetsList.querySelectorAll('img.wallet-asset-img').forEach((img) => {
+            img.addEventListener('error', () => {
+                const span = document.createElement('span');
+                span.className = 'wallet-asset-fallback';
+                span.textContent = img.getAttribute('data-fallback') || '?';
+                if (img.parentNode) img.parentNode.replaceChild(span, img);
+            }, { once: true });
+        });
     }
 }
 
@@ -2172,11 +2644,11 @@ if (confirmSendBtn) {
         const to = sendRecipientInput.value.trim();
         const amount = sendAmountInput.value.trim();
         const tokenAddress = sendTokenSelect.value;
-        // Basic validation
-        const isAddress = (ethers && ethers.isAddress && ethers.isAddress(to)) || (ethers && ethers.utils && ethers.utils.isAddress && ethers.utils.isAddress(to));
+        const isEvmAddress = (ethers && ethers.isAddress && ethers.isAddress(to)) || (ethers && ethers.utils && ethers.utils.isAddress && ethers.utils.isAddress(to));
+        const isSolAddress = to && to.length >= 32 && to.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(to);
 
-        if (!isAddress) {
-            alert('Invalid Address. Please enter a valid BSC address.'); return;
+        if (!isEvmAddress && !isSolAddress) {
+            alert('Invalid Address. Please enter a valid BSC or Solana address.'); return;
         }
         if (!amount || parseFloat(amount) <= 0) {
             alert('Invalid Amount'); return;
@@ -2198,8 +2670,6 @@ if (confirmSendBtn) {
                 if (sendModal) sendModal.style.display = 'none';
                 // Refresh
                 loadWalletAssets();
-                // Also refresh history logic
-                if (typeof loadRecentTransactions === 'function') loadRecentTransactions('native-wallet');
             } else {
                 alert('Error: ' + (response ? response.error : 'Unknown'));
             }
@@ -2223,6 +2693,476 @@ if (marketsTabBtn) {
                     console.log('[ClipX] Opinion widget toggled. Visible:', response.visible);
                 }
             });
+        }
+    });
+}
+
+// ─── Solana Wallet UI Handlers ───────────────────────────
+
+function initSolWalletUI() {
+    const solActive = document.getElementById('sol-wallet-active');
+    const solSetup = document.getElementById('sol-wallet-setup');
+    const solAddrDisplay = document.getElementById('sol-wallet-address-display');
+    const solBalDisplay = document.getElementById('sol-balance-display');
+
+    function showSolWalletActive(address) {
+        if (solActive) solActive.style.display = 'block';
+        if (solSetup) solSetup.style.display = 'none';
+        if (solAddrDisplay) solAddrDisplay.value = address;
+        chrome.runtime.sendMessage({ action: 'getSolBalance' }, (resp) => {
+            if (solBalDisplay) {
+                solBalDisplay.textContent = resp && resp.success
+                    ? parseFloat(resp.balance || 0).toFixed(4) + ' SOL'
+                    : '—';
+            }
+        });
+    }
+
+    function showSolWalletSetup() {
+        if (solActive) solActive.style.display = 'none';
+        if (solSetup) solSetup.style.display = 'block';
+    }
+
+    chrome.storage.local.get(['solWallet'], (res) => {
+        if (res.solWallet && res.solWallet.address) {
+            showSolWalletActive(res.solWallet.address);
+        } else {
+            showSolWalletSetup();
+        }
+    });
+
+    const copyBtn = document.getElementById('copy-sol-address-btn');
+    if (copyBtn) {
+        copyBtn.onclick = () => {
+            if (solAddrDisplay && solAddrDisplay.value) {
+                navigator.clipboard.writeText(solAddrDisplay.value);
+                copyBtn.textContent = '✅';
+                setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+            }
+        };
+    }
+
+    const createBtn = document.getElementById('sol-create-wallet-btn');
+    if (createBtn) {
+        createBtn.onclick = () => {
+            createBtn.disabled = true;
+            createBtn.textContent = 'Creating...';
+            chrome.runtime.sendMessage({ action: 'clipxGenerateSolWallet' }, (resp) => {
+                createBtn.disabled = false;
+                createBtn.textContent = 'Create SOL Wallet';
+                if (resp && resp.success) {
+                    showSolWalletActive(resp.address);
+                    loadSolBalance();
+                    alert('Solana wallet created!\n\nAddress: ' + resp.address + '\n\nIMPORTANT: Back up your private key from the extension storage.');
+                } else {
+                    alert('Failed: ' + (resp && resp.error || 'Unknown error'));
+                }
+            });
+        };
+    }
+
+    const importBtn = document.getElementById('sol-import-wallet-btn');
+    const importForm = document.getElementById('sol-import-form');
+    if (importBtn && importForm) {
+        importBtn.onclick = () => {
+            importForm.style.display = importForm.style.display === 'none' ? 'block' : 'none';
+        };
+    }
+
+    const importConfirm = document.getElementById('sol-import-confirm-btn');
+    const importInput = document.getElementById('sol-import-key-input');
+    if (importConfirm && importInput) {
+        importConfirm.onclick = () => {
+            const key = importInput.value.trim();
+            if (!key) { alert('Please enter a private key'); return; }
+            importConfirm.disabled = true;
+            importConfirm.textContent = 'Importing...';
+            chrome.runtime.sendMessage({ action: 'clipxImportSolWallet', privateKey: key }, (resp) => {
+                importConfirm.disabled = false;
+                importConfirm.textContent = 'Import';
+                if (resp && resp.success) {
+                    importInput.value = '';
+                    if (importForm) importForm.style.display = 'none';
+                    showSolWalletActive(resp.address);
+                    loadSolBalance();
+                } else {
+                    alert('Import failed: ' + (resp && resp.error || 'Invalid key'));
+                }
+            });
+        };
+    }
+
+    const solSendBtn = document.getElementById('sol-send-btn');
+    if (solSendBtn) {
+        solSendBtn.onclick = () => {
+            const recipient = document.getElementById('sol-send-recipient');
+            const amount = document.getElementById('sol-send-amount');
+            const status = document.getElementById('sol-send-status');
+            if (!recipient || !amount) return;
+            if (!recipient.value.trim()) { if (status) status.textContent = 'Enter recipient address'; return; }
+            if (!amount.value || parseFloat(amount.value) <= 0) { if (status) status.textContent = 'Enter a valid amount'; return; }
+            solSendBtn.disabled = true;
+            if (status) status.textContent = 'Sending...';
+            chrome.runtime.sendMessage({
+                action: 'solTransfer',
+                recipient: recipient.value.trim(),
+                amount: amount.value
+            }, (resp) => {
+                solSendBtn.disabled = false;
+                if (resp && resp.success) {
+                    if (status) status.innerHTML = `✅ Sent! <a href="https://solscan.io/tx/${resp.txHash}" target="_blank" style="color: #9945FF;">View</a>`;
+                    amount.value = '';
+                    loadSolBalance();
+                } else {
+                    if (status) status.textContent = '❌ ' + (resp && resp.error || 'Failed');
+                }
+            });
+        };
+    }
+}
+
+initNativeWalletPanel();
+initSolWalletUI();
+initProWallet();
+
+// ─── Professional Wallet Hero ────────────────────────────────
+function initProWallet() {
+    const root = document.getElementById('native-wallet-panel');
+    if (!root) return;
+
+    const emptyState = document.getElementById('pro-empty-state');
+    const activeState = document.getElementById('pro-active-state');
+    const balanceAmountEl = document.getElementById('pro-balance-amount');
+    const balanceNativeEl = document.getElementById('pro-balance-native');
+    const balanceChangeEl = document.getElementById('pro-balance-change');
+    const addressTextEl = document.getElementById('pro-address-text');
+    const addressChip = document.getElementById('pro-address-chip');
+    const chainBnb = document.getElementById('pro-chain-bnb');
+    const chainSol = document.getElementById('pro-chain-sol');
+    const sendBtn = document.getElementById('pro-send-btn');
+    const receiveBtn = document.getElementById('pro-receive-btn');
+    const moreBtn = document.getElementById('pro-more-btn');
+    const moreActionBtn = document.getElementById('pro-more-action-btn');
+    const showImportEmpty = document.getElementById('native-show-import-empty');
+
+    let currentChain = localStorage.getItem('pro_wallet_chain') || 'bnb';
+    let cachedBnb = null;
+    let cachedSol = null;
+    let cachedAssets = [];
+
+    function setChain(chain) {
+        currentChain = chain === 'sol' ? 'sol' : 'bnb';
+        try { localStorage.setItem('pro_wallet_chain', currentChain); } catch (e) {}
+        if (chainBnb) chainBnb.setAttribute('aria-pressed', currentChain === 'bnb' ? 'true' : 'false');
+        if (chainSol) chainSol.setAttribute('aria-pressed', currentChain === 'sol' ? 'true' : 'false');
+        root.dataset.chain = currentChain;
+        renderHero();
+    }
+
+    function fmtUsd(n) {
+        if (!Number.isFinite(n) || n <= 0) return '$0.00';
+        if (n >= 1000) return '$' + n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+        if (n >= 1) return '$' + n.toFixed(2);
+        if (n >= 0.01) return '$' + n.toFixed(2);
+        return '$' + n.toFixed(4);
+    }
+
+    function aggregateUsd(chain) {
+        if (!Array.isArray(cachedAssets) || !cachedAssets.length) return null;
+        let total = 0;
+        let any = false;
+        cachedAssets.forEach((a) => {
+            const aChain = a.chain === 'sol' ? 'sol' : 'bnb';
+            if (aChain !== chain) return;
+            const bal = parseFloat(a.balance || 0);
+            const px = typeof a.priceUsd === 'number' ? a.priceUsd : (a.priceUsd ? parseFloat(a.priceUsd) : 0);
+            if (!Number.isFinite(bal) || !Number.isFinite(px)) return;
+            if (bal > 0 && px > 0) {
+                total += bal * px;
+                any = true;
+            }
+        });
+        return any ? total : null;
+    }
+
+    async function readState() {
+        const stored = await chrome.storage.local.get(['nativeWallet', 'solWallet', 'cachedBalance']);
+        return {
+            bscAddress: stored.nativeWallet?.address || '',
+            solAddress: stored.solWallet?.address || '',
+            cachedBalance: stored.cachedBalance || null
+        };
+    }
+
+    async function renderHero() {
+        const state = await readState();
+        const hasAny = !!(state.bscAddress || state.solAddress);
+
+        if (emptyState) emptyState.style.display = hasAny ? 'none' : 'block';
+        if (activeState) activeState.style.display = hasAny ? 'block' : 'none';
+
+        const addr = currentChain === 'sol' ? state.solAddress : state.bscAddress;
+        if (addressTextEl) addressTextEl.textContent = addr ? shortAddress(addr) : 'No wallet';
+        if (addressChip) addressChip.dataset.address = addr || '';
+
+        const nativeSym = currentChain === 'sol' ? 'SOL' : 'BNB';
+        const nativeBal = currentChain === 'sol' ? cachedSol : cachedBnb;
+        if (balanceNativeEl) {
+            balanceNativeEl.textContent = nativeBal != null
+                ? `${parseFloat(nativeBal).toFixed(4)} ${nativeSym}`
+                : `— ${nativeSym}`;
+        }
+
+        const usd = aggregateUsd(currentChain);
+        if (balanceAmountEl) balanceAmountEl.textContent = usd != null ? fmtUsd(usd) : '$0.00';
+
+        if (balanceChangeEl) {
+            const chainAssets = (cachedAssets || []).filter(a => (a.chain === 'sol' ? 'sol' : 'bnb') === currentChain);
+            let weighted = 0; let weightTotal = 0;
+            chainAssets.forEach(a => {
+                const bal = parseFloat(a.balance || 0);
+                const px = typeof a.priceUsd === 'number' ? a.priceUsd : 0;
+                const ch = typeof a.priceChange === 'number' ? a.priceChange : null;
+                if (bal > 0 && px > 0 && ch != null) {
+                    const w = bal * px;
+                    weighted += ch * w;
+                    weightTotal += w;
+                }
+            });
+            if (weightTotal > 0) {
+                const avg = weighted / weightTotal;
+                const sign = avg >= 0 ? '+' : '';
+                balanceChangeEl.textContent = `${sign}${avg.toFixed(2)}% 24h`;
+                balanceChangeEl.style.display = 'inline-flex';
+                balanceChangeEl.classList.toggle('negative', avg < 0);
+            } else {
+                balanceChangeEl.style.display = 'none';
+            }
+        }
+    }
+
+    function refreshNativeBalances() {
+        chrome.storage.local.get(['nativeWallet'], (res) => {
+            const a = res.nativeWallet?.address;
+            if (!a) { cachedBnb = null; renderHero(); return; }
+            chrome.runtime.sendMessage({ action: 'getBnbBalance', walletAddress: a }, (r) => {
+                if (r && r.success) cachedBnb = parseFloat(r.balance || 0);
+                renderHero();
+            });
+        });
+        chrome.runtime.sendMessage({ action: 'getSolBalance' }, (r) => {
+            if (r && r.success) cachedSol = parseFloat(r.balance || 0);
+            renderHero();
+        });
+    }
+
+    // Sheet helpers ---------------------------------------------------------
+    function openSheet(id) {
+        const s = document.getElementById(id);
+        if (!s) return;
+        s.classList.add('is-open');
+        document.body.style.overflow = 'hidden';
+    }
+    function closeSheet(id) {
+        const s = document.getElementById(id);
+        if (!s) return;
+        s.classList.remove('is-open');
+        document.body.style.overflow = '';
+    }
+    function closeAllSheets() {
+        document.querySelectorAll('.pro-sheet-backdrop.is-open').forEach((s) => s.classList.remove('is-open'));
+        document.body.style.overflow = '';
+    }
+
+    document.querySelectorAll('.pro-sheet-backdrop').forEach((sheet) => {
+        sheet.addEventListener('click', (e) => {
+            if (e.target === sheet || e.target.matches('[data-pro-close]')) {
+                sheet.classList.remove('is-open');
+                document.body.style.overflow = '';
+            }
+        });
+    });
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAllSheets();
+    });
+
+    // Chain switch ----------------------------------------------------------
+    if (chainBnb) chainBnb.addEventListener('click', () => setChain('bnb'));
+    if (chainSol) chainSol.addEventListener('click', () => setChain('sol'));
+
+    // Address chip → copy
+    if (addressChip) {
+        addressChip.addEventListener('click', () => {
+            const a = addressChip.dataset.address;
+            if (!a) return;
+            navigator.clipboard.writeText(a).then(() => {
+                const original = addressTextEl ? addressTextEl.textContent : '';
+                if (addressTextEl) addressTextEl.textContent = 'Copied ✓';
+                setTimeout(() => { if (addressTextEl) addressTextEl.textContent = original; }, 1100);
+            });
+        });
+    }
+
+    // Hero actions ----------------------------------------------------------
+    if (sendBtn) sendBtn.addEventListener('click', () => openSendSheet());
+    if (receiveBtn) receiveBtn.addEventListener('click', () => openReceiveSheet());
+    if (moreBtn) moreBtn.addEventListener('click', () => openSheet('pro-more-sheet'));
+    if (moreActionBtn) moreActionBtn.addEventListener('click', () => openSheet('pro-more-sheet'));
+
+    if (showImportEmpty) {
+        showImportEmpty.addEventListener('click', () => openSheet('pro-import-sheet'));
+    }
+
+    // More menu rows --------------------------------------------------------
+    const menuRefresh = document.getElementById('pro-menu-refresh');
+    const menuCreateSol = document.getElementById('pro-menu-create-sol');
+    const menuImport = document.getElementById('pro-menu-import');
+    const menuExport = document.getElementById('pro-menu-export');
+    const menuRemove = document.getElementById('pro-menu-remove');
+    const menuSolSub = document.getElementById('pro-menu-sol-sub');
+
+    if (menuRefresh) {
+        menuRefresh.addEventListener('click', async () => {
+            await refreshNativeWalletPanel();
+            refreshNativeBalances();
+            if (typeof loadWalletAssets === 'function') loadWalletAssets();
+            closeSheet('pro-more-sheet');
+        });
+    }
+    if (menuCreateSol) {
+        menuCreateSol.addEventListener('click', () => {
+            closeSheet('pro-more-sheet');
+            openSheet('pro-sol-sheet');
+        });
+    }
+    if (menuImport) {
+        menuImport.addEventListener('click', () => {
+            closeSheet('pro-more-sheet');
+            openSheet('pro-import-sheet');
+        });
+    }
+    if (menuExport) {
+        menuExport.addEventListener('click', () => {
+            closeSheet('pro-more-sheet');
+            openSheet('pro-export-sheet');
+        });
+    }
+    if (menuRemove) {
+        menuRemove.addEventListener('click', () => {
+            closeSheet('pro-more-sheet');
+            const m = document.getElementById('logoutModal');
+            if (m) m.style.display = 'flex';
+        });
+    }
+
+    // Update Solana row subtitle dynamically
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local') return;
+        if (changes.solWallet || changes.nativeWallet) {
+            renderHero();
+            refreshNativeBalances();
+        }
+    });
+
+    // ── Send Sheet ─────────────────────────────────────────────
+    function openSendSheet() {
+        const bnbForm = document.getElementById('pro-send-bnb');
+        const solForm = document.getElementById('pro-send-sol');
+        const fromEl = document.getElementById('pro-send-from');
+        readState().then((state) => {
+            if (currentChain === 'sol') {
+                if (bnbForm) bnbForm.style.display = 'none';
+                if (solForm) solForm.style.display = 'block';
+                if (fromEl) fromEl.textContent = state.solAddress ? shortAddress(state.solAddress) + ' · SOL' : 'No SOL wallet';
+            } else {
+                if (bnbForm) bnbForm.style.display = 'block';
+                if (solForm) solForm.style.display = 'none';
+                if (fromEl) fromEl.textContent = state.bscAddress ? shortAddress(state.bscAddress) + ' · BSC' : 'No BSC wallet';
+            }
+            openSheet('pro-send-sheet');
+        });
+    }
+
+    // ── Receive Sheet ──────────────────────────────────────────
+    const recvBnbBtn = document.getElementById('pro-recv-bnb');
+    const recvSolBtn = document.getElementById('pro-recv-sol');
+    const recvAddrEl = document.getElementById('pro-recv-address');
+    const recvNetworkLabel = document.getElementById('pro-recv-network-label');
+    const recvCopyBtn = document.getElementById('pro-recv-copy');
+    const recvShareBtn = document.getElementById('pro-recv-share');
+    const recvQrEl = document.getElementById('pro-recv-qr');
+
+    let receiveChain = currentChain;
+
+    function paintReceive() {
+        readState().then((state) => {
+            if (recvBnbBtn) recvBnbBtn.setAttribute('aria-pressed', receiveChain === 'bnb' ? 'true' : 'false');
+            if (recvSolBtn) recvSolBtn.setAttribute('aria-pressed', receiveChain === 'sol' ? 'true' : 'false');
+            const addr = receiveChain === 'sol' ? state.solAddress : state.bscAddress;
+            if (recvAddrEl) recvAddrEl.textContent = addr || 'No address available — create or import this wallet first.';
+            if (recvNetworkLabel) recvNetworkLabel.textContent = receiveChain === 'sol' ? 'Solana' : 'BSC';
+            if (recvQrEl) {
+                recvQrEl.innerHTML = '';
+                if (addr && window.ClipxQR) {
+                    try {
+                        recvQrEl.innerHTML = window.ClipxQR.toSvg(addr, { scale: 4, margin: 2, dark: '#0a0a0c', light: '#fff' });
+                    } catch (e) {
+                        recvQrEl.textContent = 'QR error';
+                    }
+                } else if (!addr) {
+                    recvQrEl.textContent = '—';
+                }
+            }
+        });
+    }
+
+    function openReceiveSheet() {
+        receiveChain = currentChain;
+        paintReceive();
+        openSheet('pro-receive-sheet');
+    }
+    if (recvBnbBtn) recvBnbBtn.addEventListener('click', () => { receiveChain = 'bnb'; paintReceive(); });
+    if (recvSolBtn) recvSolBtn.addEventListener('click', () => { receiveChain = 'sol'; paintReceive(); });
+    if (recvCopyBtn) recvCopyBtn.addEventListener('click', () => {
+        readState().then((state) => {
+            const addr = receiveChain === 'sol' ? state.solAddress : state.bscAddress;
+            if (!addr) return;
+            navigator.clipboard.writeText(addr).then(() => {
+                const orig = recvCopyBtn.textContent;
+                recvCopyBtn.textContent = 'Copied ✓';
+                setTimeout(() => { recvCopyBtn.textContent = orig; }, 1100);
+            });
+        });
+    });
+    if (recvShareBtn) recvShareBtn.addEventListener('click', () => {
+        readState().then((state) => {
+            const addr = receiveChain === 'sol' ? state.solAddress : state.bscAddress;
+            if (!addr) return;
+            const url = receiveChain === 'sol'
+                ? `https://solscan.io/account/${addr}`
+                : `https://bscscan.com/address/${addr}`;
+            if (navigator.share) {
+                navigator.share({ title: 'My ClipX wallet', text: addr, url }).catch(() => {});
+            } else {
+                window.open(url, '_blank');
+            }
+        });
+    });
+
+    // Listen for asset renders to recompute hero balance / 24h change
+    document.addEventListener('clipx:assets-rendered', (e) => {
+        const list = e?.detail?.assets;
+        cachedAssets = Array.isArray(list) ? list : [];
+        renderHero();
+    });
+
+    // First paint
+    setChain(currentChain);
+    refreshNativeBalances();
+    renderHero();
+    readState().then((state) => {
+        if ((state.bscAddress || state.solAddress) && typeof loadWalletAssets === 'function') {
+            loadWalletAssets();
         }
     });
 }

@@ -1,0 +1,5 @@
+[
+  "function _tokenInfos(address token) view returns (uint256 version, address token, address quote, uint256 lastPrice, uint256 tradingFeeRate, uint256 minTradingFee, uint256 launchTime, uint256 offers, uint256 maxOffers, uint256 funds, uint256 maxFunds, bool liquidityAdded, uint256 template)",
+  "function buyTokenAMAP(address token, address to, uint256 funds, uint256 minAmount) payable returns (uint256 amount)",
+  "function sellToken(address token, uint256 amount, uint256 minFunds) returns (uint256 funds)"
+]

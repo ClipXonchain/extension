@@ -1,34 +1,89 @@
 // ClipX Tipping Assistant - Content Script
 const CLIPX_PRODUCTION_API = 'https://clipx.app';
+const CLIPX_DEV_API = 'http://localhost:3000';
 let API_BASE = CLIPX_PRODUCTION_API;
+let _clipxDevMode = false;
 
-function clipxNormalizeApiBase(v) {
-    if (typeof v !== 'string' || !v.trim()) return CLIPX_PRODUCTION_API;
+function clipxNormalizeApiBase(v, devMode) {
+    const fallback = devMode ? CLIPX_DEV_API : CLIPX_PRODUCTION_API;
+    if (typeof v !== 'string' || !v.trim()) return fallback;
     try {
         const u = new URL(v);
-        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return CLIPX_PRODUCTION_API;
-        return v.replace(/\/$/, '') || CLIPX_PRODUCTION_API;
+        if (!devMode && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return CLIPX_PRODUCTION_API;
+        return v.replace(/\/$/, '') || fallback;
     } catch {
-        return CLIPX_PRODUCTION_API;
+        return fallback;
     }
 }
 
-chrome.storage.local.get(['apiBase'], (result) => {
-    const next = clipxNormalizeApiBase(result.apiBase);
+function clipxStoredApiLooksLocal(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return true;
+    try {
+        const u = new URL(raw.trim());
+        return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+    } catch {
+        return false;
+    }
+}
+
+chrome.storage.local.get(['apiBase', 'clipxDevMode', 'clipxProdApiDefaultApplied'], (result) => {
+    let dev = result.clipxDevMode === true;
+    let raw = typeof result.apiBase === 'string' ? result.apiBase.trim() : '';
+
+    let didMigrateLocalDefault = false;
+    if (!result.clipxProdApiDefaultApplied && clipxStoredApiLooksLocal(raw)) {
+        dev = false;
+        raw = CLIPX_PRODUCTION_API;
+        didMigrateLocalDefault = true;
+        chrome.storage.local.set({
+            apiBase: CLIPX_PRODUCTION_API,
+            clipxDevMode: false,
+            clipxProdApiDefaultApplied: true,
+        });
+    } else if (!result.clipxProdApiDefaultApplied) {
+        chrome.storage.local.set({ clipxProdApiDefaultApplied: true });
+    }
+
+    _clipxDevMode = dev;
+    const next = clipxNormalizeApiBase(raw || (dev ? CLIPX_DEV_API : CLIPX_PRODUCTION_API), dev);
     API_BASE = next;
-    if (result.apiBase !== next) chrome.storage.local.set({ apiBase: next });
-    console.log('[ClipX Content] API_BASE initialized to:', API_BASE);
+
+    if (!didMigrateLocalDefault) {
+        const patch = {};
+        if (result.apiBase !== next) patch.apiBase = next;
+        if (result.clipxDevMode !== dev) patch.clipxDevMode = dev;
+        if (Object.keys(patch).length) chrome.storage.local.set(patch);
+    }
+
+    console.log('[ClipX Content] API_BASE initialized to:', API_BASE, _clipxDevMode ? '(dev)' : '');
 });
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !changes.apiBase) return;
-    const v = changes.apiBase.newValue;
-    API_BASE = clipxNormalizeApiBase(typeof v === 'string' ? v : '');
+    if (areaName !== 'local') return;
+    if (changes.clipxDevMode) _clipxDevMode = changes.clipxDevMode.newValue === true;
+    if (!changes.apiBase && !changes.clipxDevMode) return;
+    const v = changes.apiBase ? changes.apiBase.newValue : API_BASE;
+    API_BASE = clipxNormalizeApiBase(typeof v === 'string' ? v : '', _clipxDevMode);
     console.log('[ClipX Content] API_BASE updated to:', API_BASE);
 });
 
 let processedTweets = new Set();
 window.clipxTokenMap = {};
+
+const CLIPX_NATIVE_SOL_TOKEN = {
+    address: 'So11111111111111111111111111111111111111112',
+    chain: 'sol',
+    decimals: 9,
+    name: 'Solana',
+    logoURI: '',
+    isVerified: true,
+    source: 'priority'
+};
+
+function clipxEnsureNativeSolTokenMap() {
+    window.clipxTokenMap = window.clipxTokenMap || {};
+    window.clipxTokenMap.SOL = { ...CLIPX_NATIVE_SOL_TOKEN };
+}
 
 /** Single-post permalink (Post view), not timeline or profile home */
 function clipxIsSingleStatusPermalinkPage() {
@@ -93,7 +148,8 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
             position: relative !important;
             overflow: hidden !important;
             border-radius: 0 !important;
-            background: rgba(0, 0, 0, 0.75) !important;
+            color: #fff !important;
+            background: linear-gradient(135deg, rgba(88, 28, 135, 0.92), rgba(147, 51, 234, 0.82), rgba(236, 72, 153, 0.72)) !important;
             border: 2px solid rgba(168, 85, 247, 0.8) !important;
             animation: clipx-pulse-border 2s infinite ease-in-out !important;
             box-shadow: 0 0 12px rgba(168, 85, 247, 0.5), inset 0 0 8px rgba(168, 85, 247, 0.2) !important;
@@ -130,7 +186,11 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
         .clipx-label-glow {
             --glow-color: rgba(168, 85, 247, 0.6);
             border-radius: 0 !important;
+            color: #fff !important;
+            background: linear-gradient(90deg, #ec4899 0%, #8b5cf6 24%, #06b6d4 48%, #10b981 72%, #f59e0b 100%) !important;
             background-size: 200% 100% !important;
+            border: 1px solid rgba(255, 255, 255, 0.26) !important;
+            text-shadow: 0 0 6px rgba(0, 0, 0, 0.45) !important;
             animation: clipx-shimmer 3s infinite linear, clipx-breathe 2.5s infinite ease-in-out !important;
             line-height: 1 !important;
             font-size: 11px !important;
@@ -293,6 +353,21 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
         body.LightsOut .clipx-label-gradient {
             color: #fff !important;
         }
+        /* Keep effect-specific label colors intact in both X light/dark themes. */
+        .clipx-label-spotlight,
+        .clipx-label-glow,
+        html[data-color-theme="light"] .clipx-label-spotlight,
+        html[data-theme="light"] .clipx-label-spotlight,
+        html[data-color-theme="dark"] .clipx-label-spotlight,
+        html[data-theme="dark"] .clipx-label-spotlight,
+        body.LightsOut .clipx-label-spotlight,
+        html[data-color-theme="light"] .clipx-label-glow,
+        html[data-theme="light"] .clipx-label-glow,
+        html[data-color-theme="dark"] .clipx-label-glow,
+        html[data-theme="dark"] .clipx-label-glow,
+        body.LightsOut .clipx-label-glow {
+            color: #fff !important;
+        }
     `;
     document.head.appendChild(style);
 }
@@ -302,6 +377,42 @@ let currentLabelStyle = 'gradient'; // default
 chrome.storage.local.get(['labelEffectStyle'], (r) => {
     currentLabelStyle = r.labelEffectStyle || 'gradient';
 });
+
+let currentTokenPillStyle = 'market';
+chrome.storage.local.get(['tokenPillStyle'], (r) => {
+    currentTokenPillStyle = clipxNormalizeTokenPillStyle(r.tokenPillStyle);
+    clipxApplyTokenPillStyleToExisting();
+});
+
+function clipxNormalizeTokenPillStyle(style) {
+    if (style === 'classic' || style === 'clean') return 'market';
+    if (style === 'neon') return 'chain';
+    if (style === 'compact') return 'micro';
+    return ['market', 'chain', 'micro'].includes(style) ? style : 'market';
+}
+
+function clipxTokenPillStyleClass() {
+    return `clipx-token-pill-style-${currentTokenPillStyle}`;
+}
+
+function clipxApplyTokenPillStyleToElement(el) {
+    if (!el || !el.classList) return;
+    el.classList.remove(
+        'clipx-token-pill-style-classic',
+        'clipx-token-pill-style-compact',
+        'clipx-token-pill-style-clean',
+        'clipx-token-pill-style-neon',
+        'clipx-token-pill-style-market',
+        'clipx-token-pill-style-chain',
+        'clipx-token-pill-style-micro'
+    );
+    el.classList.add(clipxTokenPillStyleClass());
+}
+
+function clipxApplyTokenPillStyleToExisting() {
+    if (typeof document === 'undefined') return;
+    document.querySelectorAll('.clipx-token-pill-main, .clipx-cashtag-pill-row').forEach(clipxApplyTokenPillStyleToElement);
+}
 
 function applyLabelStyle(element) {
     element.classList.remove('clipx-label-spotlight', 'clipx-label-glow', 'clipx-label-gradient');
@@ -334,6 +445,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             document.querySelectorAll('.clipx-feed-label, .clipx-profile-label-badge, .clipx-user-list-label').forEach(el => {
                 applyLabelStyle(el);
             });
+        }
+
+        if (request.tokenPillStyle) {
+            currentTokenPillStyle = clipxNormalizeTokenPillStyle(request.tokenPillStyle);
+            clipxApplyTokenPillStyleToExisting();
         }
     }
 });
@@ -370,6 +486,9 @@ function createTipButton(username) {
         cursor: pointer !important;
         user-select: none !important;
         transition: background-color 0.2s ease !important;
+        pointer-events: auto !important;
+        position: relative !important;
+        z-index: 1 !important;
     `;
 
     btn.onmouseenter = function () {
@@ -380,18 +499,20 @@ function createTipButton(username) {
         this.style.backgroundColor = 'rgba(29, 155, 240, 0.1) !important';
     };
 
-    btn.onclick = function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('[ClipX] Opening modal for:', username);
-        createModal(username, 'tip', '', this);
+    const openTip = function (e) {
+        clipxOpenTipBadgeModal(btn, e);
     };
+    btn.addEventListener('pointerdown', openTip, true);
+    btn.addEventListener('mousedown', openTip, true);
+    btn.addEventListener('touchstart', openTip, true);
+    btn.addEventListener('click', openTip, true);
 
     return btn;
 }
 
 // Show Risk Modal
-const showRiskModal = (address, symbol) => {
+const showRiskModal = (address, symbol, chain = 'bnb') => {
+    const _urls = clipxChainUrls(chain, address);
     const existing = document.getElementById('clipx-risk-modal');
     if (existing) existing.remove();
 
@@ -545,7 +666,7 @@ const showRiskModal = (address, symbol) => {
                     </div>
                 </div>
 
-                <div style="font-size: 9px; color: #a1a1aa; margin-bottom: 4px; font-weight: 600;">Buy Presets (BNB)</div>
+                <div style="font-size: 9px; color: #a1a1aa; margin-bottom: 4px; font-weight: 600;">Buy Presets (${_urls.nativeSymbol})</div>
                 <div style="display: flex; gap: 6px; margin-bottom: 10px;">
                     <input type="number" id="clipx-set-buy1" step="0.01" style="flex: 1; width: 0; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px; border-radius: 4px; font-size: 10px; outline: none; text-align: center; transition: border-color 0.2s;" onfocusin="this.style.borderColor='rgba(139, 92, 246, 0.5)'" onfocusout="this.style.borderColor='rgba(255,255,255,0.1)'">
                     <input type="number" id="clipx-set-buy2" step="0.01" style="flex: 1; width: 0; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); color: #fff; padding: 4px; border-radius: 4px; font-size: 10px; outline: none; text-align: center; transition: border-color 0.2s;" onfocusin="this.style.borderColor='rgba(139, 92, 246, 0.5)'" onfocusout="this.style.borderColor='rgba(255,255,255,0.1)'">
@@ -651,13 +772,13 @@ const showRiskModal = (address, symbol) => {
 
         if (type === 'dex') {
             title = 'DexScreener';
-            externalLink = `https://dexscreener.com/bsc/${address}`;
+            externalLink = _urls.dex;
         } else if (type === 'gmgn') {
             title = 'GMGN.ai (KOLs)';
-            externalLink = `https://gmgn.ai/bsc/token/${address}`;
+            externalLink = _urls.gmgn;
         } else {
             title = 'Bubblemaps';
-            externalLink = `https://app.bubblemaps.io/bsc/token/${address}`;
+            externalLink = _urls.bubble;
         }
 
         panelContent = `
@@ -740,7 +861,7 @@ const showRiskModal = (address, symbol) => {
             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
                 ${currentSettings.buyPresets.map(amt => `
                     <button class="clipx-trade-btn" data-type="buy" data-amount="${amt}" style="background: ${buyBg}; border: 1px solid ${buyBorder}; color: ${buyColor}; padding: 8px; border-radius: 8px; font-size: 11px; cursor: pointer; transition: all 0.2s; font-weight: 700; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                        ${buyLabel} ${amt} BNB
+                        ${buyLabel} ${amt} ${_urls.nativeSymbol}
                     </button>
                 `).join('')}
             </div>
@@ -778,15 +899,16 @@ const showRiskModal = (address, symbol) => {
 
                 if (type === 'sell') {
                     try {
-                        // Get user's wallet address
-                        const storage = await chrome.storage.local.get(['userAddress', 'nativeWallet']);
-                        const walletAddress = storage.userAddress || (storage.nativeWallet && storage.nativeWallet.address);
+                        const storage = await chrome.storage.local.get(['userAddress', 'nativeWallet', 'solWallet']);
+                        const walletAddress = chain === 'sol'
+                            ? (storage.solWallet && storage.solWallet.address)
+                            : (storage.userAddress || (storage.nativeWallet && storage.nativeWallet.address));
 
                         if (walletAddress) {
-                            // Fetch token balance
+                            const tokBalAction = chain === 'sol' ? 'getSolTokenBalance' : 'getTokenBalance';
                             const balanceResponse = await new Promise((resolve) => {
                                 chrome.runtime.sendMessage({
-                                    action: 'getTokenBalance',
+                                    action: tokBalAction,
                                     walletAddress: walletAddress,
                                     tokenAddress: address
                                 }, resolve);
@@ -812,8 +934,9 @@ const showRiskModal = (address, symbol) => {
                     }
                 }
 
+                const swapAction = chain === 'sol' ? 'solSwap' : 'swap';
                 chrome.runtime.sendMessage({
-                    action: 'swap',
+                    action: swapAction,
                     tokenAddress: address,
                     amount: actualAmount,
                     type: type,
@@ -1192,8 +1315,10 @@ const showRiskModal = (address, symbol) => {
         }
     });
 
-    // Fetch Risk
-    chrome.runtime.sendMessage({ action: 'checkTokenRisk', address }, (response) => {
+    // Fetch Risk — dispatch to SOL or BNB handler
+    const riskAction = chain === 'sol' ? 'getSolRisk' : 'checkTokenRisk';
+    const riskPayload = chain === 'sol' ? { action: riskAction, mint: address } : { action: riskAction, address };
+    chrome.runtime.sendMessage(riskPayload, (response) => {
         const loading = modal.querySelector('#clipx-risk-loading');
         const resultDiv = modal.querySelector('#clipx-risk-result');
 
@@ -1348,35 +1473,38 @@ const showRiskModal = (address, symbol) => {
 
             if (bubbleBtn) {
                 bubbleBtn.onclick = () => {
-                    toggleSidePanel('bubble', chrome.runtime.getURL(`src/bubble_embed.html?address=${address}&chain=bsc`));
+                    toggleSidePanel('bubble', chrome.runtime.getURL(`src/bubble_embed.html?address=${address}&chain=${chain}`));
                 };
             }
 
             if (dexBtn) {
                 dexBtn.onclick = () => {
-                    toggleSidePanel('dex', `https://dexscreener.com/bsc/${address}?embed=1&theme=dark`);
+                    toggleSidePanel('dex', _urls.dexEmbed);
                 };
             }
 
             if (gmgnBtn) {
                 gmgnBtn.onclick = () => {
-                    toggleSidePanel('gmgn', `https://gmgn.ai/bsc/token/${address}`);
+                    toggleSidePanel('gmgn', _urls.gmgn);
                 };
             }
 
             if (binanceBtn) {
-                binanceBtn.onclick = () => {
-                    // Binance blocks iframe embedding, open in popup window
-                    const width = 980;
-                    const height = 820;
-                    const left = window.screen.width - width - 50;
-                    const top = (window.screen.height - height) / 2;
-                    window.open(
-                        `https://web3.binance.com/en/token/bsc/${address}`,
-                        'BinanceWeb3',
-                        `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
-                    );
-                };
+                if (_urls.binanceToken) {
+                    binanceBtn.onclick = () => {
+                        const width = 980;
+                        const height = 820;
+                        const left = window.screen.width - width - 50;
+                        const top = (window.screen.height - height) / 2;
+                        window.open(
+                            _urls.binanceToken,
+                            'BinanceWeb3',
+                            `width=${width},height=${height},left=${left},top=${top},scrollbars=yes,resizable=yes`
+                        );
+                    };
+                } else {
+                    binanceBtn.style.display = 'none';
+                }
             }
 
             // FETCH HOLDERS LOGIC - OPTIMIZED
@@ -1587,7 +1715,7 @@ const showRiskModal = (address, symbol) => {
                                 e.stopPropagation();
                                 e.preventDefault();
                                 const addr = btn.dataset.address;
-                                toggleSidePanel('gmgn', `https://gmgn.ai/bsc/address/${addr}`);
+                                toggleSidePanel('gmgn', _urls.gmgnAddress(addr));
                             };
                         });
                         kolDiv.querySelectorAll('.clipx-tag-btn').forEach(btn => {
@@ -1695,8 +1823,10 @@ const showRiskModal = (address, symbol) => {
                 });
             }
 
-            // Fetch GMGN Data (Background)
-            chrome.runtime.sendMessage({ action: 'fetchTopHolders', address }, (holderResponse) => {
+            // Fetch holder data — dispatch to SOL or BNB handler
+            const holderAction = chain === 'sol' ? 'getSolTopHolders' : 'fetchTopHolders';
+            const holderPayload = chain === 'sol' ? { action: holderAction, mint: address } : { action: holderAction, address };
+            chrome.runtime.sendMessage(holderPayload, (holderResponse) => {
                 if (holderResponse && holderResponse.success && holderResponse.holders && holderResponse.holders.length > 0) {
                     holders = holderResponse.holders;
                     dataSource = 'GMGN.ai';
@@ -1827,9 +1957,18 @@ function clipxPlaySwapSuccessSound() {
 }
 
 function clipxWalletAddressFromStorage(res) {
-    return res.userAddress ||
-        (res.nativeWallet && res.nativeWallet.address) ||
+    return (res.nativeWallet && res.nativeWallet.address) ||
+        res.userAddress ||
         (res.cachedBalance && res.cachedBalance.wallet && res.cachedBalance.wallet.address);
+}
+
+function clipxShowTradeButtonError(btn, originalText, message, fallback = 'Swap failed') {
+    const errorText = message || fallback;
+    btn.title = errorText;
+    btn.textContent = 'Error';
+    setTimeout(() => {
+        if (btn.textContent === 'Error') btn.textContent = originalText;
+    }, 1800);
 }
 
 function ensureClipxTokenPillStyles() {
@@ -1837,12 +1976,48 @@ function ensureClipxTokenPillStyles() {
     const st = document.createElement('style');
     st.id = 'clipx-token-pill-styles';
     st.textContent = `
-.clipx-token-pill-wrap{display:inline-flex;flex-direction:column;align-items:stretch;width:fit-content;max-width:min(100%,360px);min-width:0;vertical-align:baseline;margin:6px 0.14em;box-sizing:border-box;position:relative;}
-.clipx-token-pill-main{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:9999px;font-size:10px;font-weight:700;letter-spacing:0.01em;line-height:1.35;cursor:pointer;user-select:none;flex:0 0 auto;width:max-content;max-width:min(100%,220px);border:1px solid rgba(0,0,0,0.1);box-shadow:0 1px 2px rgba(0,0,0,0.12),inset 0 1px 0 rgba(255,255,255,0.28);transition:filter .15s ease,box-shadow .15s ease;}
-.clipx-token-pill-main:hover{filter:brightness(1.05);box-shadow:0 2px 4px rgba(0,0,0,0.16),inset 0 1px 0 rgba(255,255,255,0.3);}
-.clipx-token-pill-main.clipx-token-pill-main--unlisted:hover{filter:brightness(1.08);box-shadow:0 2px 5px rgba(0,0,0,0.2),inset 0 1px 0 rgba(255,255,255,0.22);}
-.clipx-token-pill-main .clipx-ticker{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;}
-.clipx-token-pill-main .clipx-verified-badge{width:11px!important;height:11px!important;font-size:8px!important;margin-left:3px!important;}
+.clipx-cashtag-pill-row{display:flex;align-items:center;flex-wrap:wrap;gap:4px;margin:0 0 4px 0;padding:0;line-height:1.15;max-width:100%;position:relative;z-index:2;}
+.clipx-cashtag-pill-row .clipx-token-pill-wrap{margin:0!important;}
+.clipx-token-pill-wrap{display:inline-flex;flex-direction:column;align-items:stretch;width:fit-content;max-width:min(100%,320px);min-width:0;vertical-align:baseline;margin:4px 0.08em;box-sizing:border-box;position:relative;}
+.clipx-token-pill-main{--clipx-pill-bg:#F0B90B;--clipx-pill-fg:#181A20;display:inline-flex;align-items:center;gap:4px;padding:3px 7px;border-radius:5px;font-size:9px;font-weight:700;letter-spacing:0;line-height:1.25;cursor:pointer;user-select:none;flex:0 0 auto;width:max-content;max-width:min(100%,230px);border:1px solid rgba(0,0,0,0.10);background:var(--clipx-pill-bg);color:var(--clipx-pill-fg);box-shadow:none;transition:filter .15s ease,transform .15s ease,background .15s ease;pointer-events:auto!important;position:relative;z-index:1;overflow:hidden;}
+.clipx-token-pill-main:hover{filter:brightness(1.06);}
+.clipx-token-pill-main .clipx-ticker{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px;font-weight:800;}
+.clipx-token-pill-main .clipx-pill-price,.clipx-token-pill-main .clipx-pill-change,.clipx-token-pill-main .clipx-pill-chain-badge{display:none;}
+.clipx-token-pill-main .clipx-pill-chain-badge{font-size:8px;font-weight:800;letter-spacing:0.05em;padding:2px 6px;text-transform:uppercase;line-height:1.25;align-items:center;}
+.clipx-token-pill-main .clipx-verified-badge{width:9px!important;height:9px!important;font-size:6px!important;margin-left:1px!important;}
+.clipx-token-pill-main .clipx-unverified-badge{display:inline-flex;align-items:center;justify-content:center;width:9px;height:9px;font-size:7px;font-weight:900;margin-left:1px;border-radius:9999px;background:rgba(0,0,0,0.18);color:rgba(0,0,0,0.65);line-height:1;cursor:help;}
+.clipx-token-pill-main--unlisted{box-shadow:inset 0 0 0 1px rgba(0,0,0,0.18);}
+/* Style: Market — compact ticker + price chip. No % change in this style. */
+.clipx-token-pill-style-market.clipx-cashtag-pill-row{gap:4px;margin-bottom:4px;}
+.clipx-token-pill-main.clipx-token-pill-style-market{background:#0B1220!important;color:#F1F5F9!important;padding:3px 6px 3px 9px;border-radius:5px;border:1px solid rgba(148,163,184,0.18)!important;font-size:9.5px;line-height:1.25;gap:4px;box-shadow:none;}
+.clipx-token-pill-main.clipx-token-pill-style-market::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--clipx-pill-bg);}
+.clipx-token-pill-main.clipx-token-pill-style-market .clipx-ticker{color:#F8FAFC;font-weight:800;font-size:9.5px;letter-spacing:0;}
+.clipx-token-pill-main.clipx-token-pill-style-market .clipx-pill-price:not([data-empty="1"]){display:inline-flex;align-items:center;color:#DDE7F3;font-weight:700;font-size:9px;font-variant-numeric:tabular-nums;padding-left:5px;border-left:1px solid rgba(148,163,184,0.22);}
+.clipx-token-pill-main.clipx-token-pill-style-market .clipx-pill-change{display:none!important;}
+.clipx-token-pill-main.clipx-token-pill-style-market .clipx-pill-chain-badge{font-size:7.5px;font-weight:800;letter-spacing:0.05em;padding:1px 4px;border-radius:3px;background:rgba(148,163,184,0.14);color:#CBD5E1;}
+.clipx-token-pill-main.clipx-token-pill-style-market .clipx-verified-badge{width:9px!important;height:9px!important;font-size:6px!important;background:rgba(16,185,129,0.20)!important;color:#10B981!important;border:1px solid rgba(16,185,129,0.35)!important;}
+.clipx-token-pill-main.clipx-token-pill-style-market .clipx-unverified-badge{width:9px;height:9px;font-size:7px;background:rgba(245,158,11,0.18);color:#F59E0B;border:1px solid rgba(245,158,11,0.35);}
+/* Style: Chain — two-tone split tag */
+.clipx-token-pill-style-chain.clipx-cashtag-pill-row{gap:4px;margin-bottom:4px;}
+.clipx-token-pill-main.clipx-token-pill-style-chain{background:#1E293B!important;color:#F8FAFC!important;padding:0!important;border-radius:4px;border:1px solid rgba(248,250,252,0.10)!important;gap:0;font-size:9.5px;line-height:1.2;}
+.clipx-token-pill-main.clipx-token-pill-style-chain .clipx-ticker{padding:2px 6px;color:#F8FAFC;font-weight:800;}
+.clipx-token-pill-main.clipx-token-pill-style-chain .clipx-pill-chain-badge{display:inline-flex;background:var(--clipx-pill-bg);color:var(--clipx-pill-fg);border-radius:0;padding:2px 6px;font-size:8px;border-left:1px solid rgba(0,0,0,0.20);}
+.clipx-token-pill-main.clipx-token-pill-style-chain .clipx-verified-badge{display:none!important;}
+/* Style: Micro — solid filled mini pill, ticker only */
+.clipx-token-pill-style-micro.clipx-cashtag-pill-row{gap:3px;margin-bottom:2px;}
+.clipx-token-pill-main.clipx-token-pill-style-micro{background:var(--clipx-pill-bg)!important;color:var(--clipx-pill-fg)!important;border:1px solid rgba(0,0,0,0.10)!important;padding:1px 5px;font-size:8.5px;font-weight:700;line-height:1.2;border-radius:9999px;box-shadow:none;gap:2px;letter-spacing:0;}
+.clipx-token-pill-main.clipx-token-pill-style-micro:hover{filter:brightness(1.08);transform:none;}
+.clipx-token-pill-main.clipx-token-pill-style-micro .clipx-ticker::before{content:'\\2022';margin-right:3px;opacity:0.6;}
+.clipx-token-pill-main.clipx-token-pill-style-micro .clipx-pill-price,.clipx-token-pill-main.clipx-token-pill-style-micro .clipx-pill-change,.clipx-token-pill-main.clipx-token-pill-style-micro .clipx-pill-chain-badge,.clipx-token-pill-main.clipx-token-pill-style-micro .clipx-verified-badge{display:none!important;}
+/* xStocks variant — tokenized US equities on BNB Chain.
+   Uses sky-blue accent and forces the xSTOCK badge to always be visible so
+   the user can distinguish a tokenized stock from a regular crypto pill. */
+.clipx-token-pill-main--xstock .clipx-pill-chain-badge{display:inline-flex!important;background:rgba(14,165,233,0.18);color:#0EA5E9;padding:1px 4px;border-radius:3px;font-size:7.5px;font-weight:800;letter-spacing:0.06em;}
+.clipx-token-pill-main--xstock.clipx-token-pill-style-market::before{background:#0EA5E9;}
+.clipx-token-pill-main--xstock.clipx-token-pill-style-chain .clipx-pill-chain-badge{background:#0EA5E9!important;color:#fff!important;border-radius:0;padding:2px 6px;font-size:8px;}
+.clipx-token-pill-main--xstock.clipx-token-pill-style-micro{background:#0EA5E9!important;color:#FFFFFF!important;border-color:rgba(14,165,233,0.40)!important;}
+.clipx-token-pill-main--xstock.clipx-token-pill-style-micro .clipx-pill-chain-badge{display:inline-flex!important;background:rgba(255,255,255,0.16);color:#FFFFFF;padding:0 3px;border-radius:9999px;font-size:7px;letter-spacing:0.04em;margin-left:1px;}
+.clipx-token-pill-main--xstock.clipx-token-pill-style-micro .clipx-ticker::before{display:none;}
 .clipx-token-pill-expand{width:100%;min-width:0;max-height:0;opacity:0;overflow:hidden;transition:max-height .45s cubic-bezier(0.4,0,0.2,1),opacity .3s ease,margin-top .3s ease,margin-left .3s ease,width .2s ease;flex:0 0 auto;box-sizing:border-box;}
 .clipx-token-pill-wrap[data-expanded="0"] .clipx-token-pill-expand{width:0!important;min-width:0!important;margin:0!important;padding:0!important;}
 .clipx-token-pill-wrap[data-expanded="1"] .clipx-token-pill-expand{width:100%!important;max-height:420px;opacity:1;margin-top:6px;}
@@ -1867,6 +2042,7 @@ function ensureClipxTokenPillStyles() {
 .clipx-pill-settings-hint{font-size:8px;font-weight:600;color:#92400e;opacity:0.9;}
 .clipx-token-pill-foot .clipx-token-risk{font-size:10px;font-weight:700;padding:5px 10px;border-radius:5px;cursor:pointer;border:1px solid rgba(26,21,0,0.2);background:#f2d00f;color:#1a1500;}
 .clipx-token-pill-foot .clipx-token-risk:hover{filter:brightness(1.05);}
+.clipx-pill-inline-ca{font-weight:700;opacity:0.82;font-size:0.9em;letter-spacing:-0.015em;}
 `;
     document.head.appendChild(st);
 }
@@ -1907,6 +2083,8 @@ function clipxFormatPairAgeFromDexTs(raw) {
 }
 
 function clipxApplyTokenPillBuyLabels(expand) {
+    const pillChain = (expand.closest('[data-chain]') || {}).dataset?.chain || 'bnb';
+    const sym = pillChain === 'sol' ? 'SOL' : 'BNB';
     chrome.storage.local.get(['clipx_buy_presets'], (res) => {
         const presets = Array.isArray(res.clipx_buy_presets) && res.clipx_buy_presets.length
             ? res.clipx_buy_presets
@@ -1914,8 +2092,8 @@ function clipxApplyTokenPillBuyLabels(expand) {
         expand.querySelectorAll('.clipx-pill-buy').forEach((btn, i) => {
             const amt = presets[i];
             if (amt != null && Number.isFinite(amt) && amt > 0) {
-                btn.textContent = `${amt} BNB`;
-                btn.title = `Buy ${amt} BNB (preset ${i + 1} — edit in Risk → Quick Trade → ⚙️)`;
+                btn.textContent = `${amt} ${sym}`;
+                btn.title = `Buy ${amt} ${sym} (preset ${i + 1} — edit in Risk → Quick Trade → ⚙️)`;
             } else {
                 btn.textContent = '—';
                 btn.title = 'Set buy presets in Risk analysis → Quick Trade → ⚙️';
@@ -1925,28 +2103,34 @@ function clipxApplyTokenPillBuyLabels(expand) {
 }
 
 function clipxRefreshTokenPillBalances(expand, tokenAddress) {
+    const pillChain = (expand.closest('[data-chain]') || {}).dataset?.chain || 'bnb';
+    const nativeSym = pillChain === 'sol' ? 'SOL' : 'BNB';
     const bnbEl = expand.querySelector('.clipx-pill-bal-bnb');
     const tokEl = expand.querySelector('.clipx-pill-bal-tok');
     if (!bnbEl || !tokEl) return;
     const lab = expand.dataset.clipxTokenLabel || 'Token';
-    bnbEl.textContent = 'BNB: …';
+    bnbEl.textContent = `${nativeSym}: …`;
     tokEl.textContent = `${lab}: …`;
-    chrome.storage.local.get(['userAddress', 'nativeWallet', 'cachedBalance'], (res) => {
-        const w = clipxWalletAddressFromStorage(res);
+    chrome.storage.local.get(['userAddress', 'nativeWallet', 'cachedBalance', 'solWallet'], (res) => {
+        const w = pillChain === 'sol'
+            ? (res.solWallet && res.solWallet.address)
+            : clipxWalletAddressFromStorage(res);
         if (!w) {
-            bnbEl.textContent = 'BNB: —';
+            bnbEl.textContent = `${nativeSym}: —`;
             tokEl.textContent = `${lab}: —`;
             return;
         }
-        chrome.runtime.sendMessage({ action: 'getBnbBalance', walletAddress: w }, (resp) => {
+        const balAction = pillChain === 'sol' ? 'getSolBalance' : 'getBnbBalance';
+        chrome.runtime.sendMessage({ action: balAction, walletAddress: w }, (resp) => {
             if (resp && resp.success) {
-                bnbEl.textContent = `BNB: ${parseFloat(resp.balance).toFixed(4)}`;
+                bnbEl.textContent = `${nativeSym}: ${parseFloat(resp.balance).toFixed(4)}`;
             } else {
-                bnbEl.textContent = 'BNB: —';
+                bnbEl.textContent = `${nativeSym}: —`;
             }
         });
+        const tokAction = pillChain === 'sol' ? 'getSolTokenBalance' : 'getTokenBalance';
         chrome.runtime.sendMessage({
-            action: 'getTokenBalance',
+            action: tokAction,
             walletAddress: w,
             tokenAddress: tokenAddress
         }, (resp) => {
@@ -1966,6 +2150,8 @@ function clipxRefreshTokenPillBalances(expand, tokenAddress) {
  * Buy / sell using same clipx_slip, clipx_gas, clipx_buy_presets and sell % as Risk modal Quick Trade.
  */
 function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
+    const pillChain = (expand.closest('[data-chain]') || {}).dataset?.chain || 'bnb';
+
     expand.querySelectorAll('.clipx-pill-sell').forEach((btn) => {
         btn.dataset.origLabel = `${btn.dataset.pct}%`;
     });
@@ -1986,8 +2172,9 @@ function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
                 const orig = btn.textContent;
                 btn.disabled = true;
                 btn.textContent = '…';
+                const swapAction = pillChain === 'sol' ? 'solSwap' : 'swap';
                 chrome.runtime.sendMessage({
-                    action: 'swap',
+                    action: swapAction,
                     tokenAddress: tokenAddress,
                     amount: String(amount),
                     type: 'buy',
@@ -1998,8 +2185,7 @@ function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
                     const ok = !!(response && response.success);
                     btn.disabled = false;
                     if (!ok) {
-                        btn.textContent = orig;
-                        btn.title = response?.error || 'Swap failed';
+                        clipxShowTradeButtonError(btn, orig, response?.error, 'Swap failed');
                         return;
                     }
                     clipxPlaySwapSuccessSound();
@@ -2025,8 +2211,8 @@ function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
                 let actualAmount = pct;
                 let isPercentage = false;
                 try {
-                    const storage = await chrome.storage.local.get(['userAddress', 'nativeWallet']);
-                    const walletAddress = storage.userAddress || (storage.nativeWallet && storage.nativeWallet.address);
+                    const storage = await chrome.storage.local.get(['userAddress', 'nativeWallet', 'cachedBalance']);
+                    const walletAddress = clipxWalletAddressFromStorage(storage);
                     if (walletAddress) {
                         const balanceResponse = await new Promise((resolve) => {
                             chrome.runtime.sendMessage({
@@ -2050,8 +2236,9 @@ function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
                 }
                 btn.disabled = true;
                 btn.textContent = '…';
+                const sellAction = pillChain === 'sol' ? 'solSwap' : 'swap';
                 chrome.runtime.sendMessage({
-                    action: 'swap',
+                    action: sellAction,
                     tokenAddress: tokenAddress,
                     amount: actualAmount,
                     type: 'sell',
@@ -2062,8 +2249,7 @@ function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
                     const ok = !!(response && response.success);
                     btn.disabled = false;
                     if (!ok) {
-                        btn.textContent = orig;
-                        btn.title = response?.error || 'Sell failed';
+                        clipxShowTradeButtonError(btn, orig, response?.error, 'Sell failed');
                         return;
                     }
                     clipxPlaySwapSuccessSound();
@@ -2093,14 +2279,563 @@ function clipxAttachTokenPillTradeHandlers(expand, tokenAddress) {
  * Token / CA pill: gold (#f2d00f) = PancakeSwap / priority; orange (#f24b0f / white text) = off-list,
  * same palette as Surf 7d sentiment orange tier (clipxSurfSentimentTierStyle, score below 0.45).
  */
-function createBuyButton(username, address, knownSymbol = null, isVerified = false) {
+function clipxPositionFloatingCard(anchorEl, card, options = {}) {
+    if (!anchorEl || !card || !document.body.contains(anchorEl)) return;
+    const gap = options.gap == null ? 8 : options.gap;
+    const pad = options.pad == null ? 8 : options.pad;
+    const rect = anchorEl.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const cardW = cardRect.width || options.width || 320;
+    const cardH = cardRect.height || options.height || 440;
+
+    let left = rect.right + gap;
+    let top = rect.bottom + gap;
+
+    if (left + cardW > window.innerWidth - pad) left = rect.left - cardW - gap;
+    if (left < pad) left = Math.min(Math.max(rect.left, pad), window.innerWidth - cardW - pad);
+    if (top + cardH > window.innerHeight - pad) top = Math.max(pad, rect.top - cardH - gap);
+    if (top < pad) top = pad;
+
+    card.style.left = `${Math.round(left)}px`;
+    card.style.top = `${Math.round(top)}px`;
+    card.style.right = 'auto';
+    card.style.bottom = 'auto';
+}
+
+function clipxBindFloatingAnchor(overlay, card, anchorEl, options = {}) {
+    if (!overlay || !card || !anchorEl) return;
+    const reposition = () => clipxPositionFloatingCard(anchorEl, card, options);
+    const close = () => {
+        if (typeof overlay._clipxFloatingDispose === 'function') overlay._clipxFloatingDispose();
+        overlay.remove();
+    };
+    const onScroll = () => close();
+    const onResize = () => reposition();
+    overlay._clipxFloatingDispose = () => {
+        window.removeEventListener('scroll', onScroll, true);
+        window.removeEventListener('resize', onResize);
+        document.removeEventListener('pointerdown', overlay._clipxOutsidePointerDown, true);
+    };
+    reposition();
+    requestAnimationFrame(() => requestAnimationFrame(reposition));
+
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    overlay._clipxOutsidePointerDown = (e) => {
+        const target = e.target;
+        if (!target || card.contains(target) || anchorEl.contains(target)) return;
+        close();
+    };
+    setTimeout(() => {
+        if (document.body.contains(overlay)) {
+            document.addEventListener('pointerdown', overlay._clipxOutsidePointerDown, true);
+        }
+    }, 0);
+}
+
+function clipxOpenDexSidePanel(url, title = 'DexScreener', externalUrl = url) {
+    let panel = document.getElementById('clipx-dex-side-panel');
+    if (!panel) {
+        panel = document.createElement('div');
+        panel.id = 'clipx-dex-side-panel';
+        panel.style.cssText = `
+            position:fixed;top:0;right:0;width:min(800px,60vw);height:100vh;z-index:2147483646;
+            background:#000;border-left:1px solid rgba(255,255,255,0.12);
+            box-shadow:-18px 0 50px rgba(0,0,0,0.45);font-family:Inter,system-ui,-apple-system,sans-serif;
+            opacity:1;transition:width .3s cubic-bezier(0.4,0,0.2,1),opacity .3s cubic-bezier(0.4,0,0.2,1);
+            overflow:hidden;
+        `;
+        document.body.appendChild(panel);
+    }
+
+    panel.innerHTML = `
+        <div style="height:100%;display:flex;flex-direction:column;">
+            <div style="height:44px;padding:0 12px;border-bottom:1px solid #27272a;display:flex;align-items:center;justify-content:space-between;background:#09090b;color:#fff;">
+                <span style="font-size:13px;font-weight:700;">${title}</span>
+                <div style="display:flex;gap:10px;align-items:center;">
+                    <a href="${externalUrl}" target="_blank" style="font-size:11px;color:#a1a1aa;text-decoration:none;">Open New Tab ↗</a>
+                    <button id="clipx-dex-side-close" style="background:none;border:none;color:#a1a1aa;cursor:pointer;font-size:18px;line-height:1;">×</button>
+                </div>
+            </div>
+            <iframe src="${url}" style="flex:1;width:100%;border:0;background:#000;" allow="clipboard-write; fullscreen"></iframe>
+        </div>
+    `;
+
+    const close = panel.querySelector('#clipx-dex-side-close');
+    if (close) {
+        close.onclick = () => {
+            panel.style.width = '0px';
+            panel.style.opacity = '0';
+            setTimeout(() => panel.remove(), 300);
+        };
+    }
+}
+
+function clipxFormatUsdPrice(raw) {
+    const price = Number(raw);
+    if (!Number.isFinite(price) || price <= 0) return null;
+    if (price < 0.000001) return `$${price.toExponential(2)}`;
+    if (price < 0.01) return `$${price.toFixed(8)}`;
+    if (price < 1) return `$${price.toFixed(6)}`;
+    if (price < 1000) return `$${price.toFixed(4).replace(/\.?0+$/, '')}`;
+    return `$${price.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+}
+
+function showTradeModal(address, knownSymbol, chain, tokenInfoCache, anchorEl = null) {
+    const existing = document.getElementById('clipx-trade-modal');
+    if (existing) {
+        if (typeof existing._clipxFloatingDispose === 'function') existing._clipxFloatingDispose();
+        existing.remove();
+    }
+
+    const isSol = chain === 'sol';
+    const nativeSym = isSol ? 'SOL' : 'BNB';
+    const _urls = clipxChainUrls(chain, address);
+    const displaySymbol = (knownSymbol && knownSymbol !== 'Null') ? `$${knownSymbol}` : clipxFormatShortCa(address);
+
+    const info = tokenInfoCache || {};
+    let priceFmt = clipxFormatUsdPrice(info.priceUsd);
+    let changePct = null;
+    if (typeof info.priceChange === 'number') changePct = info.priceChange;
+    const mcStr = clipxFormatMcUsdCompact(info.marketCapUsd);
+    const ageStr = clipxFormatPairAgeFromDexTs(info.pairCreatedAt);
+    const liqStr = info.liquidityUsd ? clipxFormatMcUsdCompact(info.liquidityUsd) : null;
+
+    // Inject trade modal styles (once)
+    const tmStyleId = 'clipx-trade-modal-styles';
+    if (!document.getElementById(tmStyleId)) {
+        const st = document.createElement('style');
+        st.id = tmStyleId;
+        st.textContent = `
+@keyframes clipx-tm-overlay-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes clipx-tm-card-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.96); filter: blur(4px); }
+    to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+}
+@keyframes clipx-tm-shimmer {
+    0%   { background-position: 0% 50%; }
+    100% { background-position: 200% 50%; }
+}
+#clipx-trade-modal { position:fixed;top:0;left:0;width:100%;height:100%;background:transparent;z-index:2147483647;pointer-events:none;opacity:0;animation:clipx-tm-overlay-in .16s ease forwards; }
+#clipx-trade-modal * { box-sizing:border-box; }
+.clipx-tm-card {
+    width:260px;max-width:90vw;max-height:90vh;overflow-y:auto;position:fixed;pointer-events:auto;
+    background:linear-gradient(165deg,rgb(18,18,22) 0%,rgb(10,10,12) 100%);
+    border-radius:14px;
+    border:1px solid rgba(255,255,255,0.09);
+    color:#fff;
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    animation:clipx-tm-card-in .3s cubic-bezier(0.22,1,0.36,1) forwards;
+    box-shadow:0 0 0 1px rgba(139,92,246,0.24),0 18px 54px -8px rgba(0,0,0,0.86),inset 0 1px 0 rgba(255,255,255,0.1);
+    backdrop-filter:none;-webkit-backdrop-filter:none;
+}
+.clipx-tm-accent { height:2px;width:100%;background:linear-gradient(90deg,#6366f1,#22d3ee,#a78bfa,#34d399,#6366f1);background-size:220% 100%;animation:clipx-tm-shimmer 6s linear infinite;opacity:0.95;border-radius:14px 14px 0 0; }
+.clipx-tm-body { padding:8px 10px 10px; }
+.clipx-tm-icon { width:24px;height:24px;min-width:24px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1;border:1px solid rgba(255,255,255,0.12);box-shadow:0 2px 12px rgba(99,102,241,0.25),inset 0 1px 0 rgba(255,255,255,0.12); }
+.clipx-tm-close { background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);border-radius:50%;width:22px;height:22px;color:#a1a1aa;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;transition:all .15s; }
+.clipx-tm-close:hover { background:rgba(255,255,255,0.12);color:#fff; }
+.clipx-tm-meta { font-size:9px;color:#a1a1aa;font-weight:600;background:rgba(255,255,255,0.05);padding:2px 5px;border-radius:4px; }
+.clipx-tm-addr { font-family:ui-monospace,monospace;font-size:9px;color:#71717a;padding:4px 6px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);border-radius:7px;display:flex;align-items:center;gap:5px;margin-bottom:6px; }
+.clipx-tm-addr span { overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.clipx-tm-addr button { background:none;border:none;color:#a1a1aa;cursor:pointer;font-size:10px;flex-shrink:0;padding:1px;transition:color .15s; }
+.clipx-tm-addr button:hover { color:#fff; }
+.clipx-tm-bal-row { display:flex;gap:5px;margin-bottom:6px;padding:5px 7px;background:linear-gradient(135deg,rgba(99,102,241,0.08) 0%,rgba(34,211,238,0.05) 100%);border:1px solid rgba(99,102,241,0.15);border-radius:9px; }
+.clipx-tm-bal-cell { flex:1;text-align:center; }
+.clipx-tm-bal-label { font-size:8px;color:#a5b4fc;font-weight:600;letter-spacing:0.03em; }
+.clipx-tm-bal-value { font-size:12px;font-weight:700;color:#fff;margin-top:0; }
+.clipx-tm-section { font-size:8px;font-weight:700;color:#a1a1aa;letter-spacing:0.06em;text-transform:uppercase;margin-bottom:4px; }
+.clipx-tm-btn-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-bottom:6px; }
+.clipx-tm-buy-btn {
+    background:linear-gradient(135deg,rgba(16,185,129,0.12) 0%,rgba(34,197,94,0.08) 100%);
+    border:1px solid rgba(34,197,94,0.25);color:#34d399;padding:5px 3px;border-radius:7px;
+    font-size:10px;font-weight:700;cursor:pointer;transition:all .15s;
+}
+.clipx-tm-buy-btn:hover:not(:disabled) { background:rgba(34,197,94,0.2);border-color:rgba(34,197,94,0.4); }
+.clipx-tm-buy-btn:disabled { opacity:0.6;cursor:wait; }
+.clipx-tm-sell-btn {
+    background:linear-gradient(135deg,rgba(239,68,68,0.1) 0%,rgba(220,38,38,0.06) 100%);
+    border:1px solid rgba(239,68,68,0.2);color:#f87171;padding:5px 3px;border-radius:7px;
+    font-size:10px;font-weight:700;cursor:pointer;transition:all .15s;
+}
+.clipx-tm-sell-btn:hover:not(:disabled) { background:rgba(239,68,68,0.18);border-color:rgba(239,68,68,0.35); }
+.clipx-tm-sell-btn:disabled { opacity:0.6;cursor:wait; }
+.clipx-tm-links { display:flex;gap:5px;flex-wrap:wrap; }
+.clipx-tm-link-btn {
+    flex:1;min-width:0;display:flex;align-items:center;justify-content:center;
+    background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);
+    color:#a1a1aa;text-decoration:none;padding:5px 4px;border-radius:7px;
+    font-size:10px;font-weight:600;transition:all .15s;white-space:nowrap;
+}
+.clipx-tm-link-btn:hover { background:rgba(255,255,255,0.08);color:#fff;border-color:rgba(255,255,255,0.15); }
+`;
+        document.head.appendChild(st);
+    }
+
+    const chainGradient = isSol
+        ? 'linear-gradient(145deg,rgba(153,69,255,0.35) 0%,rgba(20,241,149,0.12) 100%)'
+        : 'linear-gradient(145deg,rgba(240,185,11,0.35) 0%,rgba(242,208,15,0.12) 100%)';
+    const chainBadge = isSol
+        ? '<span style="background:rgba(153,69,255,0.25);color:#c4b5fd;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;border:1px solid rgba(153,69,255,0.3);">SOL</span>'
+        : '<span style="background:rgba(240,185,11,0.2);color:#fbbf24;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;border:1px solid rgba(240,185,11,0.3);">BSC</span>';
+    const changeHtml = changePct != null
+        ? `<span style="color:${changePct >= 0 ? '#34d399' : '#f87171'};font-size:10px;font-weight:600;">${changePct > 0 ? '+' : ''}${changePct.toFixed(2)}%</span>`
+        : '';
+
+    const overlay = document.createElement('div');
+    overlay.id = 'clipx-trade-modal';
+
+    const card = document.createElement('div');
+    card.className = 'clipx-tm-card';
+    card.setAttribute('data-chain', chain);
+
+    card.innerHTML = `
+        <div class="clipx-tm-accent"></div>
+        <div class="clipx-tm-body">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px;">
+                <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:0;">
+                    ${info.iconUrl
+                        ? `<img src="${info.iconUrl}" style="width:24px;height:24px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);" onerror="this.style.display='none'">`
+                        : `<div class="clipx-tm-icon" style="background:${chainGradient};">⚡</div>`}
+                    <div style="min-width:0;">
+                        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                            <span style="font-size:14px;font-weight:800;letter-spacing:-0.02em;background:linear-gradient(120deg,#c4b5fd 0%,#a5b4fc 40%,#67e8f9 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">${displaySymbol}</span>
+                            ${chainBadge}
+                        </div>
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:2px;">
+                            <span id="clipx-tm-price" style="font-size:11px;font-weight:700;color:#fff;">${priceFmt ? `Price ${priceFmt} USD` : 'Price loading…'}</span>
+                            <span id="clipx-tm-change">${changeHtml}</span>
+                        </div>
+                    </div>
+                </div>
+                <button class="clipx-tm-close" id="clipx-trade-close">&times;</button>
+            </div>
+
+            <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap;">
+                <span class="clipx-tm-meta" id="clipx-tm-mcap">MC ${mcStr || 'loading…'}</span>
+                ${ageStr ? `<span class="clipx-tm-meta" id="clipx-tm-age">Age ${ageStr}</span>` : `<span class="clipx-tm-meta" id="clipx-tm-age" style="display:none;"></span>`}
+                ${liqStr ? `<span class="clipx-tm-meta" id="clipx-tm-liq">Liq ${liqStr}</span>` : `<span class="clipx-tm-meta" id="clipx-tm-liq" style="display:none;"></span>`}
+            </div>
+            <div style="margin-bottom:6px;line-height:1.35;">
+                <span class="clipx-tm-meta" id="clipx-tm-tax" style="display:inline-block;max-width:100%;word-break:break-word;">${isSol ? 'Tax: N/A' : 'Tax: …'}</span>
+            </div>
+
+            <div class="clipx-tm-addr">
+                <span style="flex:1;min-width:0;">${address}</span>
+                <button id="clipx-trade-copy" title="Copy address">📋</button>
+            </div>
+
+            <div class="clipx-tm-bal-row">
+                <div class="clipx-tm-bal-cell">
+                    <div class="clipx-tm-bal-label">${nativeSym}</div>
+                    <div class="clipx-tm-bal-value" id="clipx-tm-native-bal">—</div>
+                </div>
+                <div style="width:1px;background:rgba(99,102,241,0.15);"></div>
+                <div class="clipx-tm-bal-cell">
+                    <div class="clipx-tm-bal-label">${knownSymbol || 'Token'}</div>
+                    <div class="clipx-tm-bal-value" id="clipx-tm-token-bal">—</div>
+                </div>
+                <button id="clipx-tm-refresh" style="background:none;border:none;cursor:pointer;color:#a5b4fc;font-size:12px;padding:0 4px;transition:transform .3s;" title="Refresh">🔄</button>
+            </div>
+
+            <div class="clipx-tm-section">Buy</div>
+            <div class="clipx-tm-btn-grid">
+                <button class="clipx-tm-buy-btn" data-preset-idx="0">…</button>
+                <button class="clipx-tm-buy-btn" data-preset-idx="1">…</button>
+                <button class="clipx-tm-buy-btn" data-preset-idx="2">…</button>
+            </div>
+
+            <div class="clipx-tm-section">Sell</div>
+            <div class="clipx-tm-btn-grid" style="margin-bottom:7px;">
+                <button class="clipx-tm-sell-btn" data-pct="25">25%</button>
+                <button class="clipx-tm-sell-btn" data-pct="50">50%</button>
+                <button class="clipx-tm-sell-btn" data-pct="100">100%</button>
+            </div>
+
+            <div class="clipx-tm-links">
+                <button id="clipx-tm-risk" class="clipx-tm-link-btn" style="background:linear-gradient(135deg,rgba(139,92,246,0.15) 0%,rgba(59,130,246,0.1) 100%);border-color:rgba(139,92,246,0.25);color:#c4b5fd;">🛡️ Risk</button>
+            </div>
+        </div>
+    `;
+
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+    const closeTradeOverlay = () => {
+        if (typeof overlay._clipxFloatingDispose === 'function') overlay._clipxFloatingDispose();
+        overlay.remove();
+    };
+    if (anchorEl) {
+        clipxBindFloatingAnchor(overlay, card, anchorEl, { width: 260, height: 332 });
+    } else {
+        card.style.left = '50%';
+        card.style.top = '50%';
+        card.style.transform = 'translate(-50%, -50%)';
+        const onScroll = () => closeTradeOverlay();
+        const onPointerDown = (e) => {
+            if (card.contains(e.target)) return;
+            closeTradeOverlay();
+        };
+        overlay._clipxFloatingDispose = () => {
+            window.removeEventListener('scroll', onScroll, true);
+            document.removeEventListener('pointerdown', onPointerDown, true);
+        };
+        setTimeout(() => {
+            window.addEventListener('scroll', onScroll, true);
+            document.addEventListener('pointerdown', onPointerDown, true);
+        }, 0);
+    }
+
+    // Close
+    card.querySelector('#clipx-trade-close').onclick = () => closeTradeOverlay();
+
+    // Copy
+    card.querySelector('#clipx-trade-copy').onclick = (e) => {
+        e.stopPropagation();
+        const btn = e.currentTarget;
+        navigator.clipboard.writeText(address).then(() => {
+            btn.textContent = '✓';
+            setTimeout(() => { btn.textContent = '📋'; }, 1200);
+        });
+    };
+
+    // Risk
+    card.querySelector('#clipx-tm-risk').onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeTradeOverlay();
+        showRiskModal(address, knownSymbol, chain);
+    };
+
+    const applyTradeInfo = (nextInfo) => {
+        if (!nextInfo || !document.body.contains(card)) return;
+        const nextPrice = clipxFormatUsdPrice(nextInfo.priceUsd);
+        const priceEl = card.querySelector('#clipx-tm-price');
+        if (priceEl) priceEl.textContent = nextPrice ? `Price ${nextPrice} USD` : 'Price N/A';
+
+        const changeEl = card.querySelector('#clipx-tm-change');
+        if (changeEl) {
+            const pct = typeof nextInfo.priceChange === 'number' ? nextInfo.priceChange : null;
+            changeEl.innerHTML = pct != null
+                ? `<span style="color:${pct >= 0 ? '#34d399' : '#f87171'};font-size:10px;font-weight:600;">${pct > 0 ? '+' : ''}${pct.toFixed(2)}%</span>`
+                : '';
+        }
+
+        const nextMc = clipxFormatMcUsdCompact(nextInfo.marketCapUsd);
+        const mcEl = card.querySelector('#clipx-tm-mcap');
+        if (mcEl) mcEl.textContent = `MC ${nextMc || 'N/A'}`;
+
+        const nextAge = clipxFormatPairAgeFromDexTs(nextInfo.pairCreatedAt);
+        const ageEl = card.querySelector('#clipx-tm-age');
+        if (ageEl && nextAge) {
+            ageEl.textContent = `Age ${nextAge}`;
+            ageEl.style.display = '';
+        }
+
+        const nextLiq = nextInfo.liquidityUsd ? clipxFormatMcUsdCompact(nextInfo.liquidityUsd) : null;
+        const liqEl = card.querySelector('#clipx-tm-liq');
+        if (liqEl && nextLiq) {
+            liqEl.textContent = `Liq ${nextLiq}`;
+            liqEl.style.display = '';
+        }
+    };
+
+    if (!priceFmt || !mcStr) {
+        chrome.runtime.sendMessage({ action: 'fetchTokenInfo', address, chain, symbol: knownSymbol }, (response) => {
+            if (response && response.success) {
+                applyTradeInfo(response);
+                return;
+            }
+
+            if (knownSymbol) {
+                chrome.runtime.sendMessage({ action: 'resolveTickerDexScreener', symbol: knownSymbol }, (resolved) => {
+                    const hasResolvedMarketData = !!(resolved && resolved.success && (resolved.priceUsd || resolved.marketCapUsd || resolved.liquidityUsd));
+                    if (hasResolvedMarketData) {
+                        applyTradeInfo(resolved);
+                    }
+                    if (resolved && resolved.success && resolved.address && resolved.address !== address) {
+                        const nextChain = resolved.chain || chain;
+                        chrome.runtime.sendMessage({ action: 'fetchTokenInfo', address: resolved.address, chain: nextChain, symbol: knownSymbol }, (nextInfo) => {
+                            if (nextInfo && nextInfo.success) applyTradeInfo(nextInfo);
+                            else if (!hasResolvedMarketData) applyTradeInfo({ priceUsd: null, marketCapUsd: null });
+                        });
+                    } else if (!hasResolvedMarketData) {
+                        applyTradeInfo({ priceUsd: null, marketCapUsd: null });
+                    }
+                });
+            } else {
+                applyTradeInfo({ priceUsd: null, marketCapUsd: null });
+            }
+        });
+    }
+
+    // Load balances
+    const loadTradeModalBalances = () => {
+        const nativeEl = card.querySelector('#clipx-tm-native-bal');
+        const tokenEl = card.querySelector('#clipx-tm-token-bal');
+        if (nativeEl) nativeEl.textContent = '…';
+        if (tokenEl) tokenEl.textContent = '…';
+        chrome.storage.local.get(['userAddress', 'nativeWallet', 'cachedBalance', 'solWallet'], (res) => {
+            const w = isSol
+                ? (res.solWallet && res.solWallet.address)
+                : clipxWalletAddressFromStorage(res);
+            if (!w) {
+                if (nativeEl) nativeEl.textContent = '—';
+                if (tokenEl) tokenEl.textContent = '—';
+                return;
+            }
+            const balAction = isSol ? 'getSolBalance' : 'getBnbBalance';
+            chrome.runtime.sendMessage({ action: balAction, walletAddress: w }, (resp) => {
+                if (nativeEl) nativeEl.textContent = (resp && resp.success) ? parseFloat(resp.balance).toFixed(4) : '—';
+            });
+            const tokAction = isSol ? 'getSolTokenBalance' : 'getTokenBalance';
+            chrome.runtime.sendMessage({ action: tokAction, walletAddress: w, tokenAddress: address }, (resp) => {
+                if (!tokenEl) return;
+                if (resp && resp.success && resp.balance != null) {
+                    const b = parseFloat(resp.balance);
+                    tokenEl.textContent = !Number.isFinite(b) || b === 0 ? '0' : (b >= 1e9 ? b.toExponential(2) : b.toFixed(b < 0.0001 ? 8 : 4));
+                } else {
+                    tokenEl.textContent = '0';
+                }
+            });
+        });
+    };
+    loadTradeModalBalances();
+
+    const taxEl = card.querySelector('#clipx-tm-tax');
+    const setTradeModalTax = (text) => {
+        if (taxEl && document.body.contains(card)) taxEl.textContent = text;
+    };
+    if (!isSol) {
+        chrome.runtime.sendMessage({ action: 'checkTokenRisk', address }, (response) => {
+            if (chrome.runtime.lastError) {
+                setTradeModalTax('Tax: unavailable');
+                return;
+            }
+            if (!document.body.contains(card)) return;
+            if (response && response.success && response.data) {
+                const d = response.data;
+                const buy = parseFloat(d.buy_tax);
+                const sell = parseFloat(d.sell_tax);
+                const buyS = Number.isFinite(buy) ? `${buy}%` : '—';
+                const sellS = Number.isFinite(sell) ? `${sell}%` : '—';
+                setTradeModalTax(`Tax: buy ${buyS} · sell ${sellS}`);
+            } else {
+                setTradeModalTax('Tax: unavailable');
+            }
+        });
+    }
+
+    // Refresh
+    card.querySelector('#clipx-tm-refresh').onclick = (e) => {
+        e.stopPropagation();
+        const btn = e.currentTarget;
+        btn.style.transform = 'rotate(360deg)';
+        setTimeout(() => { btn.style.transform = ''; }, 350);
+        loadTradeModalBalances();
+    };
+
+    // Buy labels
+    chrome.storage.local.get(['clipx_buy_presets'], (res) => {
+        const presets = Array.isArray(res.clipx_buy_presets) && res.clipx_buy_presets.length ? res.clipx_buy_presets : [0.05, 0.1, 0.2];
+        card.querySelectorAll('.clipx-tm-buy-btn').forEach((btn, i) => {
+            const amt = presets[i];
+            btn.textContent = (amt != null && Number.isFinite(amt) && amt > 0) ? `${amt} ${nativeSym}` : '—';
+        });
+    });
+
+    // Buy handlers
+    card.querySelectorAll('.clipx-tm-buy-btn').forEach((btn) => {
+        btn.onclick = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const idx = parseInt(btn.getAttribute('data-preset-idx'), 10);
+            chrome.storage.local.get(['clipx_slip', 'clipx_gas', 'clipx_buy_presets'], (res) => {
+                const slip = res.clipx_slip != null ? parseFloat(res.clipx_slip) : 1;
+                const gas = res.clipx_gas != null ? parseFloat(res.clipx_gas) : 1;
+                const presets = Array.isArray(res.clipx_buy_presets) && res.clipx_buy_presets.length ? res.clipx_buy_presets : [0.05, 0.1, 0.2];
+                const amount = presets[idx];
+                if (amount == null || !Number.isFinite(amount) || amount <= 0) return;
+                const orig = btn.textContent;
+                btn.disabled = true;
+                btn.textContent = '⏳';
+                const swapAction = isSol ? 'solSwap' : 'swap';
+                chrome.runtime.sendMessage({ action: swapAction, tokenAddress: address, amount: String(amount), type: 'buy', slippage: slip, gasPrice: gas, isPercentage: false }, (response) => {
+                    btn.disabled = false;
+                    if (response && response.success) {
+                        clipxPlaySwapSuccessSound();
+                        btn.textContent = '✓';
+                        setTimeout(() => { btn.textContent = orig; loadTradeModalBalances(); }, 1600);
+                    } else {
+                        clipxShowTradeButtonError(btn, orig, response?.error, 'Swap failed');
+                    }
+                });
+            });
+        };
+    });
+
+    // Sell handlers
+    card.querySelectorAll('.clipx-tm-sell-btn').forEach((btn) => {
+        btn.onclick = async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const pct = btn.dataset.pct;
+            const orig = `${pct}%`;
+            chrome.storage.local.get(['clipx_slip', 'clipx_gas'], async (res) => {
+                const slip = res.clipx_slip != null ? parseFloat(res.clipx_slip) : 1;
+                const gas = res.clipx_gas != null ? parseFloat(res.clipx_gas) : 1;
+                let actualAmount = pct;
+                let isPercentage = false;
+                try {
+                    const storage = await chrome.storage.local.get(['userAddress', 'nativeWallet', 'cachedBalance', 'solWallet']);
+                    const walletAddress = isSol
+                        ? (storage.solWallet && storage.solWallet.address)
+                        : clipxWalletAddressFromStorage(storage);
+                    if (walletAddress) {
+                        const tokAction = isSol ? 'getSolTokenBalance' : 'getTokenBalance';
+                        const balanceResponse = await new Promise((resolve) => {
+                            chrome.runtime.sendMessage({ action: tokAction, walletAddress, tokenAddress: address }, resolve);
+                        });
+                        if (balanceResponse && balanceResponse.success && balanceResponse.balance) {
+                            actualAmount = (parseFloat(balanceResponse.balance) * parseFloat(pct) / 100).toString();
+                        } else { isPercentage = true; }
+                    } else { isPercentage = true; }
+                } catch { isPercentage = true; }
+                btn.disabled = true;
+                btn.textContent = '⏳';
+                const sellAction = isSol ? 'solSwap' : 'swap';
+                chrome.runtime.sendMessage({ action: sellAction, tokenAddress: address, amount: actualAmount, type: 'sell', slippage: slip, gasPrice: gas, isPercentage }, (response) => {
+                    btn.disabled = false;
+                    if (response && response.success) {
+                        clipxPlaySwapSuccessSound();
+                        btn.textContent = '✓';
+                        setTimeout(() => { btn.textContent = orig; loadTradeModalBalances(); }, 1600);
+                    } else {
+                        clipxShowTradeButtonError(btn, orig, response?.error, 'Sell failed');
+                    }
+                });
+            });
+        };
+    });
+}
+
+function createBuyButton(username, address, knownSymbol = null, isVerified = false, chain = 'bnb', extra = null) {
     ensureClipxTokenPillStyles();
+    const isXStock = !!(extra && extra.isXStock);
+    if (isXStock) chain = 'bnb';
+    const isSol = chain === 'sol';
+    const xStockIssuer = (extra && extra.issuer) || null; // 'backed' | 'ondo'
+    const xStockVenue = isXStock ? 'pancakeswap' : ((extra && extra.venue) || (isSol ? 'jupiter' : 'pancakeswap'));
     const onPancakeSwapList = !!isVerified;
-    const pillColors = onPancakeSwapList
-        ? { bg: '#f2d00f', fg: '#1a1500' }
-        : (typeof clipxSurfSentimentTierStyle === 'function'
-            ? clipxSurfSentimentTierStyle(0.4)
-            : { bg: '#f24b0f', fg: '#fff' });
+    // Pill color is purely chain-driven so users can tell at a glance which
+    // network a token trades on. Verification status is conveyed separately
+    // via the ✓ badge and the tooltip — NOT via the background color.
+    //   • BSC      → BNB-yellow   (#F0B90B)  — verified or unverified
+    //   • Solana   → Solana-purple (#9945FF) — verified or unverified
+    //   • xStocks  → sky-blue on BNB Chain / PancakeSwap
+    const pillColors = isXStock
+        ? { bg: '#0284C7', fg: '#FFFFFF' }
+        : isSol
+            ? { bg: '#9945FF', fg: '#FFFFFF' }
+            : { bg: '#F0B90B', fg: '#181A20' };
 
     const container = document.createElement('span');
     container.style.cssText = 'display: inline; vertical-align: baseline; margin: 0 0.12em;';
@@ -2109,100 +2844,127 @@ function createBuyButton(username, address, knownSymbol = null, isVerified = fal
     wrap.className = 'clipx-token-pill-wrap';
     wrap.setAttribute('data-expanded', '0');
     wrap.setAttribute('data-username', username);
-    wrap.setAttribute('data-clipx-pill-source', onPancakeSwapList ? 'pancakeswap' : 'other');
+    wrap.setAttribute('data-chain', chain);
+    wrap.dataset.clipxAddress = address;
+    wrap.dataset.clipxSymbol = knownSymbol || '';
+    if (isXStock) wrap.dataset.clipxIsXstock = '1';
+    wrap.setAttribute(
+        'data-clipx-pill-source',
+        isXStock ? 'xstocks' : (isSol ? 'solana' : (onPancakeSwapList ? 'pancakeswap' : 'other'))
+    );
 
     const main = document.createElement('span');
-    main.className = onPancakeSwapList
-        ? 'clipx-token-pill-main'
-        : 'clipx-token-pill-main clipx-token-pill-main--unlisted';
-    main.style.background = pillColors.bg;
-    main.style.color = pillColors.fg;
-    if (!onPancakeSwapList) {
+    let mainClass = 'clipx-token-pill-main';
+    // Unverified BSC tokens keep the BNB-yellow background but get a thin dashed
+    // outline + warning glyph (rendered after the chain badge) so the trust
+    // signal survives without hijacking the chain color.
+    const showUnverifiedHint = !isXStock && !isSol && !onPancakeSwapList;
+    if (showUnverifiedHint) mainClass += ' clipx-token-pill-main--unlisted';
+    if (isXStock) mainClass += ' clipx-token-pill-main--xstock';
+    main.className = mainClass;
+    clipxApplyTokenPillStyleToElement(main);
+    main.dataset.clipxAddress = address;
+    main.dataset.clipxSymbol = knownSymbol || '';
+    main.dataset.clipxChain = chain;
+    main.dataset.clipxUsername = username || '';
+    if (isXStock) main.dataset.clipxIsXstock = '1';
+    main.style.setProperty('--clipx-pill-bg', pillColors.bg);
+    main.style.setProperty('--clipx-pill-fg', pillColors.fg);
+    if (isXStock) {
+        const issuerLabel = xStockIssuer === 'ondo' ? 'Ondo Finance' : 'Backed Finance';
+        const chainLabel = isSol ? 'Solana' : 'BNB Chain';
+        const venueLabel = xStockVenue === 'pancakeswap' ? 'PancakeSwap' : 'Jupiter';
+        const onChainSymbol = (extra && extra.displaySymbol) ||
+            (xStockIssuer === 'ondo' ? `${knownSymbol}on` : `${knownSymbol}x`);
+        main.title = `Tokenized stock (${onChainSymbol} on ${chainLabel}, by ${issuerLabel}) — click to trade via ${venueLabel}`;
+    } else if (!onPancakeSwapList && !isSol) {
         main.title = 'Not on PancakeSwap token list — verify contract before trading.';
+    } else if (isSol) {
+        main.title = 'Solana token — click to trade';
     }
 
-    const verifiedBadge = isVerified
+    if (address && knownSymbol && (isVerified || isXStock)) {
+        const caLine = `Contract: ${address}`;
+        main.title = main.title ? `${main.title} — ${caLine}` : caLine;
+    }
+
+    const trustBadge = isVerified
         ? '<span class="clipx-verified-badge" title="Verified Token">✓</span>'
-        : '';
+        : (showUnverifiedHint
+            ? '<span class="clipx-unverified-badge" title="Not on PancakeSwap token list — verify the contract before trading.">!</span>'
+            : '');
 
-    const collapsedLabel = knownSymbol ? `$${knownSymbol}` : clipxFormatShortCa(address);
+    let collapsedLabelInner;
+    if (knownSymbol && address && (isVerified || isXStock)) {
+        const sca = clipxFormatShortCa(address);
+        collapsedLabelInner = isXStock
+            ? `$${knownSymbol}`
+            : `$${knownSymbol}<span class="clipx-pill-inline-ca" title="${address}">·${sca}</span>`;
+    } else if (knownSymbol) {
+        collapsedLabelInner = `$${knownSymbol}`;
+    } else {
+        collapsedLabelInner = clipxFormatShortCa(address);
+    }
+    // Chain-aware xSTOCK badge — tells the user which network the trade settles on.
+    const chainBadgeText = isXStock
+        ? 'xSTOCK · BSC'
+        : (isSol ? 'SOL' : 'BSC');
 
-    main.innerHTML = `<span class="clipx-ticker">${collapsedLabel}</span>${verifiedBadge}`;
+    main.innerHTML = `<span class="clipx-ticker">${collapsedLabelInner}</span><span class="clipx-pill-price" data-empty="1"></span><span class="clipx-pill-change" data-empty="1"></span><span class="clipx-pill-chain-badge">${chainBadgeText}</span>${trustBadge}`;
 
-    const expand = document.createElement('div');
-    expand.className = 'clipx-token-pill-expand';
-    expand.dataset.clipxTokenLabel = knownSymbol || 'Token';
-
-    expand.innerHTML = `
-        <div class="clipx-token-pill-expand-inner">
-            <div class="clipx-token-pill-bal-row">
-                <div class="clipx-pill-bal-left">
-                    <span class="clipx-pill-bal-bnb" title="BNB balance">BNB: —</span>
-                    <span class="clipx-pill-bal-tok" title="Token balance">${expand.dataset.clipxTokenLabel}: —</span>
-                </div>
-                <div class="clipx-pill-bal-right">
-                    <button type="button" class="clipx-pill-bal-refresh" title="Refresh balances">🔄</button>
-                    <span class="clipx-pill-bal-mc" title="Market cap (DexScreener FDV / MC)">MC: —</span>
-                    <span class="clipx-pill-bal-age" title="Pair age (top BSC pool)">Age: —</span>
-                </div>
-            </div>
-            <div class="clipx-token-full-line">${address}</div>
-            <div class="clipx-token-pill-trade-grid">
-                <div class="clipx-token-pill-tr-row">
-                    <span class="clipx-pill-row-lbl">Buy</span>
-                    <div class="clipx-pill-btn-group">
-                        <button type="button" class="clipx-pill-buy" data-preset-idx="0">…</button>
-                        <button type="button" class="clipx-pill-buy" data-preset-idx="1">…</button>
-                        <button type="button" class="clipx-pill-buy" data-preset-idx="2">…</button>
-                    </div>
-                </div>
-                <div class="clipx-token-pill-tr-row">
-                    <span class="clipx-pill-row-lbl">Sell</span>
-                    <div class="clipx-pill-btn-group">
-                        <button type="button" class="clipx-pill-sell" data-pct="25">25%</button>
-                        <button type="button" class="clipx-pill-sell" data-pct="50">50%</button>
-                        <button type="button" class="clipx-pill-sell" data-pct="100">100%</button>
-                    </div>
-                </div>
-            </div>
-            <div class="clipx-token-pill-foot">
-                <span class="clipx-pill-settings-hint">Slippage, gas &amp; buy amounts: Risk → Quick Trade → ⚙️</span>
-                <button type="button" class="clipx-token-risk">Risk analysis</button>
-            </div>
-        </div>
-    `;
-
-    clipxApplyTokenPillBuyLabels(expand);
-    clipxAttachTokenPillTradeHandlers(expand, address);
-
-    main.onclick = (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const wasOpen = wrap.getAttribute('data-expanded') === '1';
-        wrap.setAttribute('data-expanded', wasOpen ? '0' : '1');
-        if (!wasOpen) {
-            clipxRefreshTokenPillBalances(expand, address);
+    // Store token info so the trade modal can show it immediately
+    let _tokenInfoCache = {};
+    if (extra && (extra.priceUsd != null || extra.marketCapUsd != null || extra.liquidityUsd != null)) {
+        _tokenInfoCache = {
+            success: true,
+            chain,
+            symbol: (extra.displaySymbol || knownSymbol || '').replace(/(x|on)$/i, '') || knownSymbol || null,
+            name: (extra.name || knownSymbol || ''),
+            priceUsd: extra.priceUsd != null ? String(extra.priceUsd) : null,
+            priceChange: typeof extra.priceChange === 'number' ? extra.priceChange : 0,
+            marketCapUsd: extra.marketCapUsd || null,
+            pairCreatedAt: extra.pairCreatedAt || null,
+            liquidityUsd: extra.liquidityUsd || null,
+            iconUrl: extra.logoURI || null,
+            source: extra.source || 'resolver'
+        };
+        const priceEl = main.querySelector('.clipx-pill-price');
+        if (priceEl && _tokenInfoCache.priceUsd) {
+            const price = parseFloat(_tokenInfoCache.priceUsd);
+            priceEl.textContent = price < 0.01 ? `$${price.toFixed(6)}` : (price < 1 ? `$${price.toFixed(4)}` : `$${price.toFixed(2)}`);
+            priceEl.removeAttribute('data-empty');
         }
-    };
+        const changeEl = main.querySelector('.clipx-pill-change');
+        if (changeEl && typeof _tokenInfoCache.priceChange === 'number') {
+            const pct = _tokenInfoCache.priceChange;
+            const sign = pct > 0 ? '+' : '';
+            changeEl.textContent = `${sign}${pct.toFixed(1)}%`;
+            changeEl.dataset.dir = pct >= 0 ? 'up' : 'down';
+            changeEl.removeAttribute('data-empty');
+        }
+    }
+    wrap._clipxTokenInfoCache = _tokenInfoCache;
+    main._clipxOpenTradeModal = () => showTradeModal(address, knownSymbol || main.dataset.clipxSymbol || null, chain, _tokenInfoCache, main);
 
-    expand.querySelector('.clipx-token-risk').onclick = (e) => {
+    main.addEventListener('click', (e) => {
         e.preventDefault();
         e.stopPropagation();
-        showRiskModal(address, knownSymbol);
-    };
-
-    wrap.addEventListener('click', (e) => e.stopPropagation());
+        e.stopImmediatePropagation();
+        try { main._clipxOpenTradeModal(); } catch (err) { console.error('[ClipX] showTradeModal error:', err); }
+    }, true);
 
     wrap.appendChild(main);
-    wrap.appendChild(expand);
     container.appendChild(wrap);
 
-    chrome.runtime.sendMessage({ action: 'fetchTokenInfo', address: address }, (response) => {
+    chrome.runtime.sendMessage({ action: 'fetchTokenInfo', address: address, chain: chain, symbol: knownSymbol }, (response) => {
         if (response && response.success) {
+            _tokenInfoCache = response;
+            wrap._clipxTokenInfoCache = response;
             const tickerEl = main.querySelector('.clipx-ticker');
             if (!tickerEl) return;
 
-            const symbol = response.symbol || knownSymbol || '???';
+            const symbol = isXStock ? (knownSymbol || response.symbol || '???') : (response.symbol || knownSymbol || '???');
+            main.dataset.clipxSymbol = symbol;
 
             let priceText = '';
             if (response.priceUsd) {
@@ -2217,47 +2979,52 @@ function createBuyButton(username, address, knownSymbol = null, isVerified = fal
             }
 
             let changeLine = '24h: N/A';
+            let changeText = '';
+            let changeDir = null;
             if (typeof response.priceChange === 'number') {
                 const pct = response.priceChange;
                 const sign = pct > 0 ? '+' : '';
                 changeLine = `24h: ${sign}${pct.toFixed(2)}%`;
+                changeText = `${sign}${pct.toFixed(1)}%`;
+                changeDir = pct >= 0 ? 'up' : 'down';
             }
 
-            // Compact inline label: symbol + price only; % change folded into tooltip (hover / expand).
-            tickerEl.textContent = priceText ? `$${symbol} ${priceText}` : `$${symbol}`;
+            tickerEl.textContent = `$${symbol}`;
 
-            expand.dataset.clipxTokenLabel = symbol;
-
-            const fullLine = expand.querySelector('.clipx-token-full-line');
-            if (fullLine) fullLine.textContent = address;
-
-            const mcEl = expand.querySelector('.clipx-pill-bal-mc');
-            const ageEl = expand.querySelector('.clipx-pill-bal-age');
-            const mcStr = clipxFormatMcUsdCompact(response.marketCapUsd);
-            if (mcEl) {
-                mcEl.textContent = mcStr ? `MC ${mcStr}` : 'MC: —';
-                mcEl.title = mcStr
-                    ? `Market cap ~${mcStr} (DexScreener FDV / MC)`
-                    : 'Market cap unavailable';
-            }
-            const ageStr = clipxFormatPairAgeFromDexTs(response.pairCreatedAt);
-            if (ageEl) {
-                ageEl.textContent = ageStr ? `Age ${ageStr}` : 'Age: —';
-                ageEl.title = ageStr
-                    ? `Pool age (top BSC pair by volume): ${ageStr}`
-                    : 'Pair creation time unavailable';
+            const priceEl = main.querySelector('.clipx-pill-price');
+            if (priceEl) {
+                if (priceText) {
+                    priceEl.textContent = priceText;
+                    priceEl.removeAttribute('data-empty');
+                } else {
+                    priceEl.textContent = '';
+                    priceEl.setAttribute('data-empty', '1');
+                }
             }
 
-            if (wrap.getAttribute('data-expanded') === '1') {
-                clipxRefreshTokenPillBalances(expand, address);
+            const changeEl = main.querySelector('.clipx-pill-change');
+            if (changeEl) {
+                if (changeText) {
+                    changeEl.textContent = changeText;
+                    changeEl.dataset.dir = changeDir || 'up';
+                    changeEl.removeAttribute('data-empty');
+                } else {
+                    changeEl.textContent = '';
+                    changeEl.removeAttribute('data-dir');
+                    changeEl.setAttribute('data-empty', '1');
+                }
             }
 
             const titleParts = [];
-            if (!onPancakeSwapList) {
+            if (isSol) {
+                titleParts.push('Solana token — click to trade');
+            } else if (!onPancakeSwapList) {
                 titleParts.push('Not on PancakeSwap list — verify contract before trading.');
             }
             titleParts.push(`Price: ${priceText || 'N/A'}`, changeLine);
+            const mcStr = clipxFormatMcUsdCompact(response.marketCapUsd);
             if (mcStr) titleParts.push(`MC: ${mcStr}`);
+            const ageStr = clipxFormatPairAgeFromDexTs(response.pairCreatedAt);
             if (ageStr) titleParts.push(`Age: ${ageStr}`);
             main.title = titleParts.join('\n');
         }
@@ -2330,8 +3097,9 @@ function clipxBindTipModalAnchor(overlay, modal, anchorEl) {
 }
 
 // Create and show modal
-async function createModal(username, initialView = 'tip', initialAddress = '', anchorEl = null) {
+async function createModal(username, initialView = 'tip', initialAddress = '', anchorEl = null, chain = 'bnb') {
     const tipAnchorEl = anchorEl;
+    const _modalUrls = clipxChainUrls(chain, initialAddress);
     // Remove existing modal if any
     const existing = document.getElementById('clipx-modal-overlay');
     if (existing) clipxCloseTipModalOverlay(existing);
@@ -2810,6 +3578,56 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
         modal.classList.add('clipx-modal--anchored');
     }
 
+    modal.innerHTML = `
+        <div class="clipx-modal-accent" aria-hidden="true"></div>
+        <div class="clipx-header clipx-header--tip">
+            <div class="clipx-header-content">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <div class="clipx-tip-icon" aria-hidden="true">💸</div>
+                    <div>
+                        <h2 class="clipx-title" style="margin:0;">ClipX Assistant</h2>
+                        <p class="clipx-subtitle" style="margin:2px 0 0;">Opening tip panel…</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="clipx-body">
+            <div style="padding:14px 0 4px;color:var(--text-muted);font-size:12px;text-align:center;">Loading…</div>
+        </div>
+    `;
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+    if (anchorEl) {
+        requestAnimationFrame(() => clipxPositionFloatingCard(anchorEl, modal, { width: 300, height: 160 }));
+    }
+    const loadingFallbackTimer = setTimeout(() => {
+        if (!document.body.contains(overlay)) return;
+        if (!modal.textContent || !modal.textContent.includes('Opening tip panel')) return;
+        modal.innerHTML = `
+            <div class="clipx-modal-accent" aria-hidden="true"></div>
+            <div class="clipx-header clipx-header--tip">
+                <div class="clipx-header-content">
+                    <div style="display:flex;align-items:center;gap:8px;">
+                        <div class="clipx-tip-icon" aria-hidden="true">💸</div>
+                        <div>
+                            <h2 class="clipx-title" style="margin:0;">ClipX Assistant</h2>
+                            <p class="clipx-subtitle" style="margin:2px 0 0;">Could not load tip data</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="clipx-body">
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.45;margin-bottom:12px;">
+                    The tip panel is waiting on extension storage or API data. Reload ClipX, then try again.
+                </div>
+                <button class="clipx-btn clipx-btn-secondary" id="clipx-close-btn">Close</button>
+            </div>
+        `;
+        const closeBtn = modal.querySelector('#clipx-close-btn');
+        if (closeBtn) closeBtn.onclick = () => clipxCloseTipModalOverlay(overlay);
+        if (overlay._clipxAnchorReposition) requestAnimationFrame(() => overlay._clipxAnchorReposition());
+    }, 2500);
+
     // Token configurations
     const tokens = {
         BNB: { color: '#f59e0b', gradient: 'linear-gradient(135deg, #f6d365 0%, #fda085 100%)', icon: '🟡' },
@@ -2829,6 +3647,7 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
     } catch (e) {
         console.log('[ClipX] Auth check failed:', e);
     }
+    clearTimeout(loadingFallbackTimer);
 
     if (!isAuthenticated) {
         // Login UI
@@ -2863,7 +3682,10 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
         // Check recipient status
         let isRecipientRegistered = false;
         try {
-            const checkResponse = await fetch(`${API_BASE}/api/user-check/${username}`);
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 1200);
+            const checkResponse = await fetch(`${API_BASE}/api/user-check/${username}`, { signal: controller.signal });
+            clearTimeout(timeoutId);
             const checkData = await checkResponse.json();
             isRecipientRegistered = checkData.isRegistered;
         } catch (error) {
@@ -2951,7 +3773,7 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
                     </div>
                     <div style="margin-bottom: 16px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); height: 200px; background: #000;">
                          <iframe 
-                            src="https://www.gmgn.cc/kline/bsc/${initialAddress}?theme=dark"
+                            src="${_modalUrls.gmgnKline}"
                             style="width: 100%; height: 100%; border: none;"
                         ></iframe>
                     </div>
@@ -3032,7 +3854,7 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
                         <input type="number" class="clipx-text-input" id="clipx-setting-slippage" value="1" style="font-size: 14px; padding: 8px;">
                     </div>
                     <div>
-                        <label class="clipx-label">Quick Buy Amounts (BNB)</label>
+                        <label class="clipx-label">Quick Buy Amounts (${_urls.nativeSymbol})</label>
                         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
                             <input type="number" class="clipx-text-input" id="clipx-setting-amt1" value="0.1" step="0.1" style="font-size: 14px; padding: 8px;">
                             <input type="number" class="clipx-text-input" id="clipx-setting-amt2" value="0.5" step="0.1" style="font-size: 14px; padding: 8px;">
@@ -3639,14 +4461,12 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
 
         const openTradeWindow = (address) => {
             if (!address) return;
-            // Use a sized popup window
             const width = 375;
             const height = 600;
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
-            const url = `https://gmgn.ai/swap?theme=light&chain=bsc&token_in=BNB&token_out=${address}`;
-
-            window.open(url, 'gmgn_swap', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+            const swapUrls = clipxChainUrls(chain, address);
+            window.open(swapUrls.gmgnSwap, 'gmgn_swap', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
         };
 
         const openGMGNWindow = (address) => {
@@ -3655,10 +4475,8 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
             const height = 750;
             const left = (screen.width - width) / 2;
             const top = (screen.height - height) / 2;
-            // GMGN BSC token URL with referral code
-            const url = `https://gmgn.ai/bsc/token/${address}?r=captain`;
-
-            window.open(url, 'gmgn_trade', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
+            const gmgnUrls = clipxChainUrls(chain, address);
+            window.open(gmgnUrls.gmgn + '?r=captain', 'gmgn_trade', `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`);
         };
 
         const nativeSwapBtn = modal.querySelector('#clipx-native-swap-btn');
@@ -3684,8 +4502,9 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
                 nativeSwapBtn.disabled = true;
                 nativeSwapBtn.style.opacity = '0.7';
 
+                const nativeSwapAction = chain === 'sol' ? 'solSwap' : 'swap';
                 chrome.runtime.sendMessage({
-                    action: 'swap',
+                    action: nativeSwapAction,
                     tokenAddress: initialAddress,
                     amount: amount,
                     type: 'buy',
@@ -3696,13 +4515,13 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
                     nativeSwapBtn.style.opacity = '1';
 
                     if (response && response.success) {
-                        swapStatus.innerHTML = `✅ Success! <a href="https://bscscan.com/tx/${response.txHash}" target="_blank" style="color: #1d9bf0;">View TX</a>`;
+                        swapStatus.innerHTML = `✅ Success! <a href="${_modalUrls.explorerTx(response.txHash)}" target="_blank" style="color: #1d9bf0;">View TX</a>`;
                         swapStatus.style.color = '#00ba7c';
                     } else {
                         const errorMsg = response.error || 'Failed';
-                        // Check if it's a liquidity/bonding curve issue
                         if (errorMsg.includes('revert') || errorMsg.includes('liquidity') || errorMsg.includes('INSUFFICIENT')) {
-                            swapStatus.innerHTML = `⚠️ No liquidity on PancakeSwap.<br><small style="color: #536471;">Use "Trade on GMGN" button below ⬇️</small>`;
+                            const dexName = chain === 'sol' ? 'Jupiter' : 'PancakeSwap';
+                            swapStatus.innerHTML = `⚠️ No liquidity on ${dexName}.<br><small style="color: #536471;">Use "Trade on GMGN" button below ⬇️</small>`;
                             swapStatus.style.color = '#f4212e';
                         } else {
                             swapStatus.textContent = `❌ ${errorMsg}`;
@@ -3724,7 +4543,7 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
 
         if (gmgnBtn) {
             gmgnBtn.onclick = () => {
-                window.open(`https://gmgn.ai/bsc/token/${initialAddress}?ref=captain`, '_blank');
+                window.open(_modalUrls.gmgn + '?ref=captain', '_blank');
             };
         }
 
@@ -3845,8 +4664,9 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
 
                 console.log(`[ClipX] Swap button clicked. Mode: ${tradeMode}, Amount: ${amount}, Token: ${tokenAddress}`);
 
+                const advSwapAction = chain === 'sol' ? 'solSwap' : 'swap';
                 chrome.runtime.sendMessage({
-                    action: 'swap',
+                    action: advSwapAction,
                     type: isBuy ? 'buy' : 'sell',
                     amount: amount.toString(),
                     tokenAddress: tokenAddress,
@@ -3894,10 +4714,10 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
                                 <div style="font-size: 48px; margin-bottom: 16px;">🎉</div>
                                 <h3 style="margin: 0 0 8px 0; color: #4ade80; font-size: 20px;">Swap Successful!</h3>
                                 <p style="margin: 0 0 16px 0; color: var(--text-muted); font-size: 13px;">
-                                    Successfully ${isBuy ? 'bought' : 'sold'} ${amount} ${isBuy ? 'BNB' : 'Tokens'}
+                                    Successfully ${isBuy ? 'bought' : 'sold'} ${amount} ${isBuy ? _modalUrls.nativeSymbol : 'Tokens'}
                                 </p>
-                                <a href="https://bscscan.com/tx/${response.txHash}" target="_blank" style="display: block; margin-bottom: 16px; color: var(--primary); text-decoration: none; font-size: 12px; background: rgba(29, 155, 240, 0.1); padding: 8px; border-radius: 8px;">
-                                    View on BscScan ↗
+                                <a href="${_modalUrls.explorerTx(response.txHash)}" target="_blank" style="display: block; margin-bottom: 16px; color: var(--primary); text-decoration: none; font-size: 12px; background: rgba(29, 155, 240, 0.1); padding: 8px; border-radius: 8px;">
+                                    View on ${chain === 'sol' ? 'Solscan' : 'BscScan'} ↗
                                 </a>
                                 <button id="clipx-success-close" style="width: 100%; padding: 10px; background: var(--primary); color: white; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">
                                     Continue Trading
@@ -4889,7 +5709,7 @@ const ProfileScanner = {
 
         // Always try to ensure dashboard key elements exist
         this.injectDashboard();
-        this.injectUsernameHistoryButton(); // Add username history button to profile header
+        this.injectUsernameHistoryButton(); // Remove legacy username history button from profile header
 
         // Fetch global profile label if exists
         this.fetchProfileLabel();
@@ -5228,10 +6048,13 @@ const ProfileScanner = {
     extractIntel(text, tweetId = null) {
         const tickerRegex = /\$[a-zA-Z]{2,10}\b/g;
         const addressRegex = /0x[a-fA-F0-9]{40}\b/g;
+        const solAddressRegex = /(?<![a-zA-Z0-9])[1-9A-HJ-NP-Za-km-z]{32,44}(?=[\s,;:!?)}\]<]|$)/g;
         const mentionRegex = /@[a-zA-Z0-9_]{1,15}\b/g;
 
         const tickers = text.match(tickerRegex) || [];
-        const addresses = text.match(addressRegex) || [];
+        const evmAddresses = text.match(addressRegex) || [];
+        const solAddresses = (text.match(solAddressRegex) || []).filter(s => clipxIsValidBase58Address(s));
+        const addresses = [...evmAddresses, ...solAddresses];
         const mentions = text.match(mentionRegex) || [];
 
         tickers.forEach(t => {
@@ -5480,6 +6303,11 @@ const ProfileScanner = {
                             this.state.sorsaTweetScoutScore =
                                 raw != null && Number.isFinite(Number(raw)) ? Number(raw) : null;
                             this.state.sorsaTweetScoutScoreError = null;
+                            clipxApplySorsaScoreCacheFromProfileFetch(
+                                h,
+                                true,
+                                this.state.sorsaTweetScoutScore,
+                            );
                         } else {
                             this.state.sorsaTweetScoutScore = null;
                             this.state.sorsaTweetScoutScoreError = resp?.error || 'Unavailable';
@@ -5779,15 +6607,15 @@ const ProfileScanner = {
         const categoryBadges = [];
         if (vcCount > 0) {
             const cls = this.cn('clipx-cat-badge', { active: this.state.smartFollowersFilter === 'vc' });
-            categoryBadges.push(`<span class="${cls}" data-type="vc" style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.2);border-radius:5px;font-size:9px;color:#d8b4fe;font-weight:700;">🏛 ${vcCount} VCs</span>`);
+            categoryBadges.push(`<span class="${cls}" data-type="vc" style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;background:rgba(168,85,247,0.1);border:1px solid rgba(168,85,247,0.22);border-radius:3%;font-size:9px;color:#d8b4fe;font-weight:700;">🏛 ${vcCount} VCs</span>`);
         }
         if (kolCount > 0) {
             const cls = this.cn('clipx-cat-badge', { active: this.state.smartFollowersFilter === 'kol' });
-            categoryBadges.push(`<span class="${cls}" data-type="kol" style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;background:rgba(236,72,153,0.1);border:1px solid rgba(236,72,153,0.2);border-radius:5px;font-size:9px;color:#f9a8d4;font-weight:700;">🎯 ${kolCount} KOLs</span>`);
+            categoryBadges.push(`<span class="${cls}" data-type="kol" style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;background:rgba(236,72,153,0.1);border:1px solid rgba(236,72,153,0.22);border-radius:3%;font-size:9px;color:#f9a8d4;font-weight:700;">🎯 ${kolCount} KOLs</span>`);
         }
         if (projectCount > 0) {
             const cls = this.cn('clipx-cat-badge', { active: this.state.smartFollowersFilter === 'project' });
-            categoryBadges.push(`<span class="${cls}" data-type="project" style="display:inline-flex;align-items:center;gap:3px;padding:1px 6px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.2);border-radius:5px;font-size:9px;color:#93c5fd;font-weight:700;">🔧 ${projectCount} Projects</span>`);
+            categoryBadges.push(`<span class="${cls}" data-type="project" style="display:inline-flex;align-items:center;gap:3px;padding:1px 5px;background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.22);border-radius:3%;font-size:9px;color:#93c5fd;font-weight:700;">🔧 ${projectCount} Projects</span>`);
         }
 
         const isExpandedNow = this.state.smartFollowersExpanded !== false;
@@ -5795,7 +6623,7 @@ const ProfileScanner = {
         // Overlapping Avatars Header (Social Proof Row)
         const previewAvatars = topFollowers.slice(0, 5).map((f, i) => `
             <img src="${f.avatar || 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png'}" 
-                 style="width:18px;height:18px;border-radius:50%;border:1.5px solid #15202b;margin-left:${i === 0 ? 0 : -6}px;z-index:${10 - i};object-fit:cover;" />
+                 style="width:16px;height:16px;border-radius:50%;border:1px solid #15202b;margin-left:${i === 0 ? 0 : -5}px;z-index:${10 - i};object-fit:cover;" />
         `).join('');
 
         const followersListHtml = topFollowers.map(f => {
@@ -5805,18 +6633,19 @@ const ProfileScanner = {
                 class="clipx-sf-pill" data-type="${followerType}"
                 style="
                     display:${isVisible ? 'inline-flex' : 'none'};
-                    align-items:center;gap:6px;
-                    padding:3px 8px 3px 3px;
-                    background:rgba(255,255,255,0.03);
-                    border:0.5px solid rgba(168,85,247,0.2);
-                    border-radius:18px;
+                    align-items:center;gap:4px;
+                    padding:2px 6px 2px 2px;
+                    background:linear-gradient(135deg, rgba(20,127,112,0.09), rgba(168,85,247,0.06));
+                    border:1px solid rgba(20,127,112,0.28);
+                    border-radius:3%;
+                    box-shadow:0 0 0 1px rgba(20,127,112,0.04) inset, 0 0 8px rgba(20,127,112,0.12);
                     cursor:pointer;
                     transition: all 0.2s ease;
                 "
             >
                 <img src="${f.avatar || 'https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png'}" 
-                     style="width:20px;height:20px;border-radius:50%;" />
-                <span style="font-size:11px;font-weight:500;color:inherit;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;">
+                     style="width:18px;height:18px;border-radius:50%;border:1px solid rgba(255,255,255,0.12);" />
+                <span style="font-size:10px;font-weight:600;color:inherit;max-width:84px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;">
                     ${f.name || f.username}
                 </span>
             </div>`;
@@ -5826,24 +6655,28 @@ const ProfileScanner = {
             <div id="clipx-smart-followers-header" style="
                 display:flex; 
                 align-items:center; 
-                gap:10px; 
+                gap:6px; 
+                width:100%;
+                max-width:100%;
+                box-sizing:border-box;
                 cursor:pointer; 
-                padding:8px 12px; 
+                padding:5px 8px; 
                 user-select:none;
-                background: rgba(20, 127, 112, 0.05);
-                border: 1px solid rgba(20, 127, 112, 0.15);
-                border-radius: 10px;
-                margin: 4px 0;
+                background: linear-gradient(135deg, rgba(20, 127, 112, 0.08), rgba(15, 23, 42, 0.04));
+                border: 1px solid rgba(20, 127, 112, 0.18);
+                border-radius: 8px;
+                margin: 2px 0;
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
                 transition: all 0.2s ease;
             ">
                 <div style="
                     display: inline-flex;
                     align-items: center;
-                    padding: 3px 10px;
-                    background: rgba(20, 127, 112, 0.1);
-                    border: 1px solid rgba(20, 127, 112, 0.3);
-                    border-radius: 6px;
-                    box-shadow: 0 0 10px rgba(20, 127, 112, 0.05);
+                    padding: 2px 6px;
+                    background: rgba(20, 127, 112, 0.08);
+                    border: 1px solid rgba(20, 127, 112, 0.22);
+                    border-radius: 3%;
+                    box-shadow: 0 0 8px rgba(20, 127, 112, 0.08);
                 ">
                     <span style="
                         font-weight:900; 
@@ -5858,29 +6691,31 @@ const ProfileScanner = {
                 </div>
 
                 <div style="display:flex; align-items:center;">
-                    <div style="display:flex; align-items:center; margin-right: 5px;">
+                    <div style="display:flex; align-items:center; margin-right: 3px;">
                         ${previewAvatars}
                     </div>
-                    ${topFollowers.length > 5 ? `<span style="font-size:9px; color:#147F70; font-weight:800; background:rgba(20, 127, 112, 0.1); padding:1px 4px; border-radius:3px;">+${topFollowers.length - 5}</span>` : ''}
+                    ${topFollowers.length > 5 ? `<span style="font-size:9px; color:#147F70; font-weight:800; background:rgba(20, 127, 112, 0.1); padding:1px 4px; border-radius:3%;">+${topFollowers.length - 5}</span>` : ''}
                 </div>
 
                 <!-- Categories (Scrolling if needed) -->
-                <div style="display:flex; align-items:center; gap:8px; flex:1; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;">
-                    <div style="display:flex; gap:6px;">
+                <div style="display:flex; align-items:center; gap:5px; flex:0 1 auto; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;">
+                    <div style="display:flex; gap:4px;">
                         ${categoryBadges.join('')}
                     </div>
                 </div>
 
-                <span id="clipx-smart-followers-toggle" style="color:rgba(20, 127, 112, 0.5); font-size:10px; margin-left: 2px;">
+                <span id="clipx-smart-followers-toggle" style="color:rgba(20, 127, 112, 0.6); font-size:9px; margin-left: 1px;">
                     ${isExpandedNow ? '▲' : '▼'}
                 </span>
             </div>
 
             <div id="clipx-smart-followers-content" style="
                 display:${isExpandedNow ? 'flex' : 'none'};
-                flex-wrap:wrap;gap:8px;
-                padding:8px 0;
-                max-height:220px;overflow-y:auto;
+                flex-wrap:wrap;
+                align-items:flex-start;
+                gap:4px 5px;
+                padding:5px 0 3px;
+                max-height:156px;overflow-y:auto;
             ">
                 ${followersListHtml}
             </div>
@@ -5889,86 +6724,8 @@ const ProfileScanner = {
 
     // --- Username History Button (in profile header area) ---
     injectUsernameHistoryButton() {
-        // Find the profile header items
-        const profileHeaderItems = document.querySelector('[data-testid="UserProfileHeader_Items"]');
-        if (!profileHeaderItems) return;
-
-        // Check if button already exists in the current header items
-        const existing = document.getElementById('clipx-username-history-btn');
-        if (existing) {
-            if (existing.parentElement === profileHeaderItems) {
-                return; // Already in the right place
-            }
-            existing.remove(); // Clean up if orphaned or misplaced
-        }
-
-        // Inject CSS for the button
-        if (!document.getElementById('clipx-username-btn-style')) {
-            const style = document.createElement('style');
-            style.id = 'clipx-username-btn-style';
-            style.textContent = `
-                #clipx-username-history-btn {
-                    display: inline-flex;
-                    align-items: center;
-                    gap: 6px;
-                    background: rgba(139, 92, 246, 0.1);
-                    border: 1px solid rgba(139, 92, 246, 0.3);
-                    border-radius: 6px;
-                    cursor: pointer;
-                    font-size: 11px;
-                    padding: 3px 10px;
-                    margin: 0 4px 0 12px;
-                    color: #d8b4fe;
-                    font-weight: 600;
-                    vertical-align: middle;
-                    user-select: none;
-                    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-                    height: 24px;
-                    line-height: 1;
-                    white-space: nowrap;
-                }
-                #clipx-username-history-btn:hover {
-                    background: rgba(139, 92, 246, 0.2);
-                    border-color: rgba(139, 92, 246, 0.5);
-                    transform: translateY(-1px);
-                    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.2);
-                }
-                #clipx-username-history-btn:active {
-                    transform: translateY(0);
-                }
-                #clipx-username-history-btn svg {
-                    opacity: 0.8;
-                }
-            `;
-            document.head.appendChild(style);
-        }
-
-        const btn = document.createElement('button');
-        btn.id = 'clipx-username-history-btn';
-        btn.type = 'button';
-        btn.innerHTML = `
-            <svg viewBox="0 0 24 24" style="width:12px; height:12px; fill:currentColor;">
-                <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm1-13h-2v6l5.25 3.15 1-1.64L13 11.5V7z"/>
-            </svg>
-            <span>History</span>
-        `;
-        btn.title = 'View Profile History';
-
-        const self = this;
-        const handleClick = async function (e) {
-            e.preventDefault();
-            e.stopPropagation();
-            console.log('[ClipX] Username History button clicked - Force fetching data');
-
-            // Show modal immediately - it fetches history via dedicated handle-history API (separate from Smart Followers)
-            self.showUsernameHistoryModal();
-        };
-
-        btn.addEventListener('click', handleClick, true);
-
-        // Append button directly to header items
-        profileHeaderItems.appendChild(btn);
-        console.log('[ClipX Intel] Injected username history button');
+        document.getElementById('clipx-username-history-btn')?.remove();
+        document.getElementById('clipx-username-btn-style')?.remove();
     },
 
     async fetchUsernameHistory() {
@@ -6831,11 +7588,10 @@ const ProfileScanner = {
                         badge.style.color = '#c084fc';
                         badge.style.cursor = 'pointer';
 
-                        // Replace onclick to open clipx.app for login on next click
+                        // Replace onclick to open the active ClipX app for login on next click
                         badge.onclick = (e2) => {
                             e2.stopPropagation();
-                            // Open clipx.app in new tab for login
-                            window.open('https://clipx.app', '_blank');
+                            window.open(API_BASE.replace(/\/$/, ''), '_blank');
                             // Reset badge after 1s
                             setTimeout(() => {
                                 this.injectLabelBadge();
@@ -7061,13 +7817,22 @@ const ProfileScanner = {
             styleEl.id = 'clipx-sf-styles';
             styleEl.textContent = `
                 @keyframes clipxFadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+                #clipx-smart-followers-header:hover {
+                    border-color: rgba(20, 127, 112, 0.28) !important;
+                    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 0 12px rgba(20, 127, 112, 0.08) !important;
+                }
                 #clipx-smart-followers-content::-webkit-scrollbar { display: none; }
                 #clipx-smart-followers-content { scrollbar-width: none; -ms-overflow-style: none; }
                 .clipx-cat-badge { cursor: pointer; transition: all 0.2s ease; }
-                .clipx-cat-badge:hover { transform: scale(1.05); }
-                .clipx-cat-badge.active { box-shadow: 0 0 10px rgba(168, 85, 247, 0.5); transform: scale(1.08); }
+                .clipx-cat-badge:hover { box-shadow: 0 0 8px rgba(168, 85, 247, 0.18); transform: translateY(-1px); }
+                .clipx-cat-badge.active { box-shadow: 0 0 10px rgba(168, 85, 247, 0.32); transform: translateY(-1px); }
                 .clipx-sf-pill { transition: all 0.15s ease; }
-                .clipx-sf-pill:hover { background: rgba(168, 85, 247, 0.2) !important; transform: translateY(-1px); }
+                .clipx-sf-pill:hover {
+                    background: linear-gradient(135deg, rgba(20,127,112,0.15), rgba(168,85,247,0.12)) !important;
+                    border-color: rgba(20,127,112,0.48) !important;
+                    box-shadow: 0 0 0 1px rgba(20,127,112,0.1) inset, 0 0 12px rgba(20,127,112,0.24) !important;
+                    transform: translateY(-1px);
+                }
             `;
             document.head.appendChild(styleEl);
         }
@@ -7352,7 +8117,7 @@ const ProfileScanner = {
         // Action button
         const actionBtn = modal.querySelector('#clipx-premium-action');
         actionBtn.onclick = () => {
-            window.open('https://clipx.app', '_blank');
+            window.open(API_BASE.replace(/\/$/, ''), '_blank');
             closeModal();
         };
     },
@@ -7460,8 +8225,9 @@ const ProfileScanner = {
                             <button class="clipx-copy-ca" data-addr="${addr}" style="background:none; border:none; cursor:pointer; color:#a1a1aa; font-size:10px; padding:2px 4px;" title="Copy full address">📋</button>
                         </div>
                         <div style="display:flex; gap:4px;">
-                            <a href="https://dexscreener.com/bsc/${addr}" target="_blank" style="background:#27272a; padding:2px 6px; border-radius:4px; font-size:10px; color:#4ade80; text-decoration:none;">DEX</a>
-                            <a href="https://bscscan.com/token/${addr}" target="_blank" style="background:#27272a; padding:2px 6px; border-radius:4px; font-size:10px; color:#fbbf24; text-decoration:none;">BSC</a>
+                            ${(() => { const _c = addr.startsWith('0x') ? 'bnb' : 'sol'; const _u = clipxChainUrls(_c, addr); return `
+                            <a href="${_u.dex}" target="_blank" style="background:#27272a; padding:2px 6px; border-radius:4px; font-size:10px; color:#4ade80; text-decoration:none;">DEX</a>
+                            <a href="${_u.explorer}" target="_blank" style="background:#27272a; padding:2px 6px; border-radius:4px; font-size:10px; color:#fbbf24; text-decoration:none;">${_c === 'sol' ? 'SOL' : 'BSC'}</a>`; })()}
                             ${tweetUrl
                     ? `<a href="${tweetUrl}" target="_blank" style="background:#27272a; padding:2px 6px; border-radius:4px; font-size:10px; color:#60a5fa; text-decoration:none;">View Tweet</a>`
                     : `<a href="${searchUrl}" target="_blank" style="background:#27272a; padding:2px 6px; border-radius:4px; font-size:10px; color:#a1a1aa; text-decoration:none;">Find Post</a>`
@@ -7594,6 +8360,9 @@ async function injectWhoToFollowLabels() {
 
 // Inject labels on user list pages (Following, Followers, People You May Know, etc.)
 async function injectUserListLabels() {
+    const path = window.location.pathname || '';
+    if (path.startsWith('/compose/')) return;
+
     // Debug: Check what selectors exist on the page
     const userNameDivs = document.querySelectorAll('[data-testid="User-Name"]');
     const userCells = document.querySelectorAll('[data-testid="UserCell"]');
@@ -7614,7 +8383,7 @@ async function injectUserListLabels() {
         'cellInnerDiv': cellInnerDivs.length,
         'typeaheadResult': typeaheadUsers.length,
         'profileLinks': userProfileLinks.length,
-        'url': window.location.pathname
+        'url': path
     });
 
     // Strategy 1: Use User-Name divs (works on some pages)
@@ -7673,7 +8442,6 @@ async function injectUserListLabels() {
     for (const userNameDiv of allUserNames) {
         // Skip if inside a tweet (those are handled by injectFeedLabels)
         if (userNameDiv.closest('article[data-testid="tweet"]')) {
-            skippedTweet++;
             continue;
         }
 
@@ -8204,7 +8972,23 @@ function injectAnalyzeButtons() {
 
 // --- Sorsa TweetScout score — gradient ring + score pill (timeline, compose, profile hero) ---
 const CLIPX_RESERVED_HANDLES = new Set(['home', 'explore', 'search', 'notifications', 'messages', 'settings', 'compose', 'i']);
-let clipxSorsaWarnedBatchFail = false;
+/** Filled only on profile visit (`getSorsaProfileScore`). Timeline pills read this — no Sorsa batch API. */
+const CLIPX_SORSA_SCORE_CACHE_KEY = 'clipxSorsaScoresByHandle';
+
+function clipxApplySorsaScoreCacheFromProfileFetch(handle, apiSucceeded, scoreFromApi) {
+    if (!apiSucceeded) return;
+    const hl = String(handle || '').toLowerCase();
+    if (!hl) return;
+    chrome.storage.local.get([CLIPX_SORSA_SCORE_CACHE_KEY], (r) => {
+        const map = { ...(r[CLIPX_SORSA_SCORE_CACHE_KEY] || {}) };
+        if (scoreFromApi != null && Number.isFinite(Number(scoreFromApi))) {
+            map[hl] = Number(scoreFromApi);
+        } else {
+            delete map[hl];
+        }
+        chrome.storage.local.set({ [CLIPX_SORSA_SCORE_CACHE_KEY]: map });
+    });
+}
 
 function clipxNormalizeProfileHref(href) {
     if (!href || href === '/') return null;
@@ -9432,8 +10216,12 @@ function clipxSorsaMarkSkippedCostFilter(p) {
     if (p.userNameDiv) p.userNameDiv.dataset.clipxSorsaNoScore = '1';
 }
 
+/**
+ * Timeline / lists / compose: show Sorsa pills only from client cache (populated on profile visits).
+ * No `getSorsaScoresBatch` — Sorsa HTTP only runs in `getSorsaProfileScore` when you open a profile.
+ */
 function injectClipxSorsaScoresOnPage() {
-    chrome.storage.local.get(['showSorsaScores', 'sorsaSkipDefaultAvatarTimeline'], (r) => {
+    chrome.storage.local.get(['showSorsaScores', 'sorsaSkipDefaultAvatarTimeline', CLIPX_SORSA_SCORE_CACHE_KEY], (r) => {
         if (r.showSorsaScores === false) return;
 
         const pending = clipxCollectAllSorsaTargets();
@@ -9443,68 +10231,31 @@ function injectClipxSorsaScoresOnPage() {
             skipDefaultAvatar: r.sorsaSkipDefaultAvatarTimeline !== false,
         };
 
-        /** Up to 50 unique handles (server cap), DOM order — includes home timeline + lists + compose + hero. */
-        const batchHandles = [];
-        const seenH = new Set();
+        const scores = r[CLIPX_SORSA_SCORE_CACHE_KEY] || {};
+
         for (const p of pending) {
             if (!clipxSorsaPassesCostFilter(p, costOpts)) {
                 clipxSorsaMarkSkippedCostFilter(p);
                 continue;
             }
             const hl = String(p.handle || '').toLowerCase();
-            if (!hl || seenH.has(hl)) continue;
-            seenH.add(hl);
-            batchHandles.push(p.handle);
-            if (batchHandles.length >= 50) break;
-        }
-        if (batchHandles.length === 0) return;
-
-        chrome.runtime.sendMessage(
-            { action: 'getSorsaScoresBatch', handles: batchHandles },
-            (resp) => {
-                if (chrome.runtime.lastError) {
-                    console.warn('[ClipX Sorsa]', chrome.runtime.lastError.message);
-                    return;
-                }
-                if (!resp || !resp.success) {
-                    if (!clipxSorsaWarnedBatchFail) {
-                        clipxSorsaWarnedBatchFail = true;
-                        console.warn(
-                            '[ClipX Sorsa] Batch failed:',
-                            resp?.error || 'no response',
-                            '— Point API_BASE at your ClipX server with TWEETSCOUT_API_KEY or SORSA_API_KEY. Test: GET',
-                            (typeof API_BASE !== 'undefined' ? API_BASE : '') + '/api/sorsa/health'
-                        );
-                    }
-                    return;
-                }
-                clipxSorsaWarnedBatchFail = false;
-                const scores = resp.scores || {};
-                pending.forEach(({ img, userNameDiv, handle }) => {
-                    const hl = String(handle || '').toLowerCase();
-                    if (!Object.prototype.hasOwnProperty.call(scores, hl)) {
-                        return;
-                    }
-                    const raw = scores[hl];
-                    if (raw == null) {
-                        if (img) img.dataset.clipxSorsaDone = '1';
-                        if (userNameDiv) userNameDiv.dataset.clipxSorsaNoScore = '1';
-                        return;
-                    }
-                    const formatted = clipxFormatSorsaScore(raw);
-                    if (!formatted) {
-                        if (img) img.dataset.clipxSorsaDone = '1';
-                        if (userNameDiv) userNameDiv.dataset.clipxSorsaNoScore = '1';
-                        return;
-                    }
-                    if (img) {
-                        clipxInjectSorsaBadgeOnAvatar(img, formatted, raw);
-                    } else if (userNameDiv) {
-                        clipxInjectSorsaPillBesideUserName(userNameDiv, formatted, raw);
-                    }
-                });
+            if (!hl || !Object.prototype.hasOwnProperty.call(scores, hl)) {
+                continue;
             }
-        );
+            const raw = scores[hl];
+            if (raw == null || !Number.isFinite(Number(raw))) {
+                continue;
+            }
+            const formatted = clipxFormatSorsaScore(raw);
+            if (!formatted) {
+                continue;
+            }
+            if (p.img) {
+                clipxInjectSorsaBadgeOnAvatar(p.img, formatted, raw);
+            } else if (p.userNameDiv) {
+                clipxInjectSorsaPillBesideUserName(p.userNameDiv, formatted, raw);
+            }
+        }
     });
 }
 
@@ -9512,10 +10263,145 @@ function injectClipxSorsaScoresOnPage() {
 
 /** In-flight ticker lookups via background (CoinGecko list + cache; dedupe per symbol). */
 window.clipxTickerResolveInFlight = window.clipxTickerResolveInFlight || new Map();
+window.clipxRejectedTickers = window.clipxRejectedTickers || new Set();
+
+/**
+ * xStocks (tokenized US equities on BNB Chain). When a $TICKER
+ * matches, we treat it as crypto-tradable rather than blocking it as a stock.
+ * Mirror of the backend's allowlist in server/routes/xstocks-routes.ts.
+ */
+const CLIPX_XSTOCKS_TICKERS = new Set([
+    'ABT', 'ABBV', 'ACN', 'ADBE', 'GOOGL', 'AMZN', 'AMBR', 'AMD', 'AAPL',
+    'APLD', 'AMAT', 'APP', 'ANET', 'ASML', 'ASTS', 'AZN', 'BAC', 'BRK.B',
+    'BTBT', 'BTGO', 'BMNR', 'AVGO', 'CVX', 'CRCL', 'CSCO', 'CLSK', 'KO',
+    'COIN', 'CMCSA', 'CEG', 'CORZ', 'CRWD', 'DHR', 'DELL', 'DFDV', 'ETN',
+    'LLY', 'UUUU', 'XOM', 'VCX', 'GLXY', 'GME', 'GEV', 'GS', 'HD', 'HON',
+    'HUT', 'INTC', 'IBM', 'JNJ', 'JPM', 'KLAC', 'KRAQ', 'LRCX', 'LIN',
+    'LITE', 'MARA', 'MRVL', 'MA', 'MCD', 'MDT', 'MRK', 'META', 'MU',
+    'MSFT', 'MSTR', 'NFLX', 'NVO', 'SMR', 'NVDA', 'OKLO', 'OPEN', 'ORCL',
+    'PLTR', 'PANW', 'PYPL', 'PEP', 'PFE', 'PM', 'PL', 'PG', 'PWR', 'RIOT',
+    'HOOD', 'RBLX', 'CRM', 'SNDK', 'SBET', 'SMCI', 'TMUS', 'TER', 'WULF',
+    'TSLA', 'TMO', 'TONX', 'TSM', 'UBER', 'UNH', 'USAR', 'VRT', 'SPCE',
+    'V', 'WMT', 'WBD', 'STRC',
+    'PALL', 'PPLT', 'IEMG', 'XLE', 'FGDL', 'COPX', 'URA', 'GLD', 'SGOV',
+    'SLV', 'ITA', 'QQQ', 'IWM', 'IJR', 'SPY', 'XOP', 'TBLL', 'TQQQ',
+    'MOO', 'SMH', 'VGK', 'VUG', 'VXUS', 'VT', 'VTI', 'SCHF'
+]);
+
+/**
+ * Dynamic xStocks catalog populated from chrome.storage.local (filled by the
+ * background script's hourly Jupiter sync). Merged with the static seed so we
+ * pick up new Backed Finance listings without an extension update.
+ */
+window.clipxDynamicXStocks = window.clipxDynamicXStocks || new Set();
+
+function clipxIsXStockTicker(ticker) {
+    const t = String(ticker || '').toUpperCase();
+    return CLIPX_XSTOCKS_TICKERS.has(t) || window.clipxDynamicXStocks.has(t);
+}
+
+function clipxLoadDynamicXStocksFromStorage() {
+    try {
+        if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) return;
+        chrome.storage.local.get('xStocksCatalog', (stored) => {
+            if (chrome.runtime.lastError) return;
+            const cat = stored && stored.xStocksCatalog;
+            if (!cat || !Array.isArray(cat.tickers)) return;
+            window.clipxDynamicXStocks = new Set(cat.tickers.map((t) => String(t).toUpperCase()));
+        });
+    } catch (e) {
+        // ignore — we'll just fall back to the static seed
+    }
+}
+
+clipxLoadDynamicXStocksFromStorage();
+
+if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.onChanged) {
+    chrome.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes.xStocksCatalog) return;
+        const next = changes.xStocksCatalog.newValue;
+        if (next && Array.isArray(next.tickers)) {
+            window.clipxDynamicXStocks = new Set(next.tickers.map((t) => String(t).toUpperCase()));
+            // Re-evaluate any rejections that may have been added before the
+            // catalog arrived (so newly-supported xStocks appear without reload).
+            if (window.clipxRejectedTickers) {
+                for (const t of [...window.clipxRejectedTickers]) {
+                    if (window.clipxDynamicXStocks.has(t)) {
+                        window.clipxRejectedTickers.delete(t);
+                    }
+                }
+            }
+        }
+    });
+}
+
+/**
+ * Hard-coded blocklist of US stocks / ETFs / common non-crypto tickers.
+ * X cashtags use $TICKER for both stocks and crypto; without filtering, $GOOGL,
+ * $NVDA, etc. were resolving to unrelated low-cap memecoins on BSC/Solana.
+ *
+ * Note: xStocks tickers (CLIPX_XSTOCKS_TICKERS) are NOT blocked even though many
+ * appear here historically — the xStocks check below short-circuits.
+ */
+const CLIPX_NON_CRYPTO_BLOCKLIST = new Set([
+    // Mega-cap US equities
+    'AAPL', 'MSFT', 'GOOG', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'NFLX', 'ORCL', 'CRM', 'ADBE',
+    'CSCO', 'INTC', 'AMD', 'QCOM', 'MU', 'AVGO', 'ASML', 'TSM', 'IBM', 'TXN', 'ANET', 'NOW',
+    // Financials
+    'BRK', 'JPM', 'BAC', 'WFC', 'C', 'GS', 'MS', 'AXP', 'BLK', 'SCHW', 'V', 'MA',
+    // Consumer / retail / healthcare / industrials
+    'WMT', 'TGT', 'COST', 'HD', 'LOW', 'NKE', 'SBUX', 'MCD', 'KO', 'PEP', 'PG', 'JNJ', 'UNH', 'PFE',
+    'MRK', 'LLY', 'ABBV', 'TMO', 'ABT', 'DIS', 'CMCSA', 'T', 'VZ', 'XOM', 'CVX', 'BA', 'CAT', 'GE',
+    'F', 'GM', 'UBER', 'LYFT', 'ABNB', 'DASH',
+    // China ADRs
+    'BABA', 'JD', 'PDD', 'BIDU', 'NIO', 'XPEV', 'LI', 'BILI', 'TME',
+    // Crypto-adjacent equities (NOT crypto tokens themselves)
+    'COIN', 'HOOD', 'MSTR', 'RIOT', 'MARA', 'CLSK', 'WULF', 'BITF', 'HUT', 'CIFR',
+    // SaaS / cloud / new tech equities
+    'PLTR', 'SNOW', 'SHOP', 'SQ', 'PYPL', 'RBLX', 'ZM', 'DOCU', 'TWLO', 'OKTA', 'CRWD',
+    'PANW', 'NET', 'DDOG', 'MDB', 'ZS', 'TEAM', 'WDAY', 'INTU', 'ADP', 'LRCX', 'KLAC', 'AMAT',
+    // Meme stocks
+    'GME', 'AMC', 'BB', 'NOK', 'BBBY', 'CHWY', 'WISH',
+    // ETFs / indices / leveraged products
+    'SPY', 'QQQ', 'VOO', 'VTI', 'IWM', 'DIA', 'GLD', 'SLV', 'TLT', 'HYG', 'LQD', 'XLK', 'XLF', 'XLE',
+    'XLV', 'XLY', 'XLP', 'XLU', 'XLI', 'XLB', 'XLRE', 'XLC', 'TQQQ', 'SQQQ', 'SOXL', 'SOXS', 'TNA',
+    'TZA', 'UVXY', 'VIX', 'VXX', 'UPRO', 'SPXU',
+    // Currencies / commodities (ambiguous with crypto symbols)
+    'USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'NZD', 'CNY', 'INR', 'KRW', 'TRY', 'BRL',
+    // Non-crypto common words people preface with $
+    'CASH', 'HOME', 'AUTO', 'WORK', 'SHOP'
+]);
+
+function clipxIsBlocklistedNonCryptoTicker(ticker) {
+    const t = String(ticker || '').toUpperCase();
+    // Tokenized stocks (xStocks/Ondo on BNB Chain) override the blocklist.
+    if (clipxIsXStockTicker(t)) return false;
+    return CLIPX_NON_CRYPTO_BLOCKLIST.has(t);
+}
 
 function clipxResolveTickerViaDexScreener(symbol) {
     const sym = (symbol || '').toUpperCase();
-    if (!sym || window.clipxTokenMap[sym]) return Promise.resolve();
+    if (sym === 'SOL') {
+        clipxEnsureNativeSolTokenMap();
+        return Promise.resolve();
+    }
+    if (!sym) return Promise.resolve();
+    const existingToken = window.clipxTokenMap[sym];
+    if (existingToken) {
+        const staleXStock =
+            existingToken.isXStock &&
+            (existingToken.chain !== 'bnb' || existingToken.issuer !== 'backed' || /on$/i.test(String(existingToken.displaySymbol || existingToken.symbol || '')));
+        if (staleXStock) delete window.clipxTokenMap[sym];
+        else return Promise.resolve();
+    }
+    if (window.clipxRejectedTickers.has(sym)) {
+        if (clipxIsXStockTicker(sym)) window.clipxRejectedTickers.delete(sym);
+        else return Promise.resolve();
+    }
+    if (clipxIsBlocklistedNonCryptoTicker(sym)) {
+        window.clipxRejectedTickers.add(sym);
+        return Promise.resolve();
+    }
     if (window.clipxTickerResolveInFlight.has(sym)) {
         return window.clipxTickerResolveInFlight.get(sym);
     }
@@ -9528,12 +10414,29 @@ function clipxResolveTickerViaDexScreener(symbol) {
             if (r && r.success && r.address) {
                 window.clipxTokenMap[sym] = {
                     address: r.address,
-                    decimals: r.decimals != null ? r.decimals : 18,
+                    chain: r.chain || 'bnb',
+                    decimals: r.decimals != null ? r.decimals : (r.chain === 'sol' ? 9 : 18),
                     name: r.name || sym,
                     logoURI: r.logoURI || '',
                     isVerified: r.isVerified === true,
+                    isXStock: r.isXStock === true,
+                    issuer: r.issuer || null,
+                    venue: r.venue || null,
+                    deployments: Array.isArray(r.deployments) ? r.deployments : null,
+                    baseSymbol: r.baseSymbol || null,
+                    displaySymbol: r.symbol || sym,
+                    priceUsd: r.priceUsd != null ? r.priceUsd : null,
+                    priceChange: typeof r.priceChange === 'number' ? r.priceChange : null,
+                    marketCapUsd: r.marketCapUsd != null ? r.marketCapUsd : null,
+                    liquidityUsd: r.liquidityUsd != null ? r.liquidityUsd : null,
+                    pairCreatedAt: r.pairCreatedAt || null,
                     source: r.source || 'coingecko'
                 };
+            } else if (r && r.notCrypto) {
+                window.clipxRejectedTickers.add(sym);
+            } else if (r && r.xStockPending) {
+                // Backend isn't ready yet — leave it un-rejected so we retry on
+                // the next pass (the cache TTL on the background side is short).
             }
             resolve();
         });
@@ -9544,19 +10447,37 @@ function clipxResolveTickerViaDexScreener(symbol) {
     return p;
 }
 
-function clipxCollectUnknownTickersFromTweetText(tweetTextDiv) {
-    const need = new Set();
-    const regex = /\$([a-zA-Z]{2,10})\b/g;
+function clipxTextNodeIsInClipxNode(node) {
+    const parent = node && node.parentElement;
+    return !!(parent && parent.closest('.clipx-cashtag-pill-row, .clipx-token-pill-wrap, .clipx-token-pill-main'));
+}
+
+function clipxCollectCashtagsFromTweetText(tweetTextDiv) {
+    const out = [];
+    const seen = new Set();
+    const regex = /(^|[^\w$])\$([a-zA-Z][a-zA-Z0-9]{1,14})\b/g;
     const walker = document.createTreeWalker(tweetTextDiv, NodeFilter.SHOW_TEXT, null, false);
     let node;
     while ((node = walker.nextNode())) {
+        if (clipxTextNodeIsInClipxNode(node)) continue;
         const text = node.nodeValue;
         regex.lastIndex = 0;
         let m;
         while ((m = regex.exec(text)) !== null) {
-            const t = m[1].toUpperCase();
-            if (!window.clipxTokenMap[t]) need.add(t);
+            const ticker = m[2].toUpperCase();
+            if (seen.has(ticker)) continue;
+            if (clipxIsBlocklistedNonCryptoTicker(ticker)) continue;
+            seen.add(ticker);
+            out.push(ticker);
         }
+    }
+    return out;
+}
+
+function clipxCollectUnknownTickersFromTweetText(tweetTextDiv) {
+    const need = new Set();
+    for (const t of clipxCollectCashtagsFromTweetText(tweetTextDiv)) {
+        if (!window.clipxTokenMap[t]) need.add(t);
     }
     return [...need];
 }
@@ -9567,66 +10488,378 @@ function clipxResolveUnknownTickersForTweetText(tweetTextDiv) {
     return Promise.all(unknown.map((t) => clipxResolveTickerViaDexScreener(t)));
 }
 
-function clipxInjectTokenPillsInTweetText(tweetTextDiv, username) {
+function clipxIsValidBase58Address(s) {
+    if (s.length < 32 || s.length > 44) return false;
+    return /^[1-9A-HJ-NP-Za-km-z]+$/.test(s);
+}
+
+function clipxCollectTokenDetectionsFromTweetText(tweetTextDiv) {
+    const detections = [];
+    const seen = new Set();
     const walker = document.createTreeWalker(tweetTextDiv, NodeFilter.SHOW_TEXT, null, false);
     let node;
-    const nodesToReplace = [];
-    const regexProbe = /(0x[a-fA-F0-9]{40})|(\$[a-zA-Z]{2,10})\b/g;
-
     while ((node = walker.nextNode())) {
-        const text = node.nodeValue;
+        if (clipxTextNodeIsInClipxNode(node)) continue;
+        const text = node.nodeValue || '';
+        const nodeMatches = [];
+
+        const evmRegex = /0x[a-fA-F0-9]{40}/g;
         let match;
-        let hasMatch = false;
-        while ((match = regexProbe.exec(text)) !== null) {
-            if (match[1]) {
-                hasMatch = true;
-            } else if (match[2]) {
-                hasMatch = true;
+        while ((match = evmRegex.exec(text)) !== null) {
+            nodeMatches.push({ index: match.index, type: 'address', address: match[0], chain: 'bnb' });
+        }
+
+        const solRegex = /(^|[\s,;:!?({\[])([1-9A-HJ-NP-Za-km-z]{32,44})(?=[\s,;:!?)}\]<]|$)/g;
+        while ((match = solRegex.exec(text)) !== null) {
+            const address = match[2];
+            if (clipxIsValidBase58Address(address)) {
+                nodeMatches.push({ index: match.index + match[1].length, type: 'address', address, chain: 'sol' });
             }
         }
-        if (hasMatch) nodesToReplace.push(node);
+
+        const cashtagRegex = /(^|[^\w$])\$([a-zA-Z][a-zA-Z0-9]{1,14})\b/g;
+        while ((match = cashtagRegex.exec(text)) !== null) {
+            const ticker = match[2].toUpperCase();
+            if (clipxIsBlocklistedNonCryptoTicker(ticker)) continue;
+            nodeMatches.push({ index: match.index + match[1].length, type: 'cashtag', ticker });
+        }
+
+        nodeMatches.sort((a, b) => a.index - b.index);
+        for (const item of nodeMatches) {
+            const key = item.type === 'cashtag'
+                ? `ticker:${item.ticker}`
+                : `address:${item.chain}:${String(item.address).toLowerCase()}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            detections.push(item);
+        }
+    }
+    return detections.slice(0, 8);
+}
+
+function clipxFindCashtagPillRow(tweetTextDiv) {
+    return Array.from(tweetTextDiv.children || []).find((child) => child.classList && child.classList.contains('clipx-cashtag-pill-row')) || null;
+}
+
+function clipxCreatePillForDetection(detection, username) {
+    if (detection.type === 'address') {
+        return createBuyButton(username, detection.address, null, false, detection.chain || 'bnb');
     }
 
-    nodesToReplace.forEach((textNode) => {
-        const text = textNode.nodeValue;
-        const fragment = document.createDocumentFragment();
-        const regex = /(0x[a-fA-F0-9]{40})|(\$[a-zA-Z]{2,10})\b/g;
-        let lastIndex = 0;
-        let match;
+    const ticker = detection.ticker;
+    if (ticker === 'SOL') clipxEnsureNativeSolTokenMap();
+    if (clipxIsBlocklistedNonCryptoTicker(ticker)) return null;
+    if (window.clipxRejectedTickers && window.clipxRejectedTickers.has(ticker)) {
+        if (clipxIsXStockTicker(ticker)) window.clipxRejectedTickers.delete(ticker);
+        else return null;
+    }
 
-        while ((match = regex.exec(text)) !== null) {
-            const before = text.slice(lastIndex, match.index);
-            if (before) fragment.appendChild(document.createTextNode(before));
-
-            const matchedText = match[0];
-            let address = null;
-            let isVerified = false;
-            if (match[1]) {
-                address = match[1];
-            } else if (match[2]) {
-                const ticker = match[2].substring(1).toUpperCase();
-                if (window.clipxTokenMap && window.clipxTokenMap[ticker]) {
-                    address = window.clipxTokenMap[ticker].address;
-                    isVerified = window.clipxTokenMap[ticker].isVerified || false;
-                }
+    const token = window.clipxTokenMap && window.clipxTokenMap[ticker];
+    if (token && token.address) {
+        // Stock/xStock cashtags are BNB Chain Backed xStocks only. Drop stale
+        // Solana or Ondo entries from older builds so the background resolver
+        // can fetch the official xStocks API deployment instead.
+        const staleXStock =
+            token.isXStock &&
+            (token.chain !== 'bnb' || token.issuer !== 'backed' || /on$/i.test(String(token.displaySymbol || token.symbol || '')));
+        if (staleXStock) {
+            delete window.clipxTokenMap[ticker];
+            return createCashtagLookupPill(ticker, username);
+        }
+        return createBuyButton(
+            username,
+            token.address,
+            ticker,
+            token.isVerified || false,
+            token.chain || 'bnb',
+            {
+                isXStock: !!token.isXStock,
+                issuer: token.issuer || null,
+                venue: token.venue || null,
+                displaySymbol: token.displaySymbol || null,
+                deployments: token.deployments || null,
+                priceUsd: token.priceUsd != null ? token.priceUsd : null,
+                priceChange: typeof token.priceChange === 'number' ? token.priceChange : null,
+                marketCapUsd: token.marketCapUsd != null ? token.marketCapUsd : null,
+                liquidityUsd: token.liquidityUsd != null ? token.liquidityUsd : null,
+                pairCreatedAt: token.pairCreatedAt || null,
+                logoURI: token.logoURI || null,
+                source: token.source || null
             }
+        );
+    }
+    return createCashtagLookupPill(ticker, username);
+}
 
-            if (address) {
-                const btn = createBuyButton(username, address, match[2] ? match[2].substring(1).toUpperCase() : null, isVerified);
-                fragment.appendChild(btn);
-            } else {
-                fragment.appendChild(document.createTextNode(matchedText));
+function clipxRenderCashtagPillRow(tweetTextDiv, username) {
+    ensureClipxTokenPillStyles();
+    const detections = clipxCollectTokenDetectionsFromTweetText(tweetTextDiv);
+    const existing = clipxFindCashtagPillRow(tweetTextDiv);
+    if (!detections.length) {
+        if (existing) existing.remove();
+        return;
+    }
+
+    const row = existing || document.createElement('span');
+    row.className = 'clipx-cashtag-pill-row';
+    row.dataset.clipxCashtagRow = '1';
+    clipxApplyTokenPillStyleToElement(row);
+    row.innerHTML = '';
+
+    detections.forEach((detection) => {
+        const pill = clipxCreatePillForDetection(detection, username);
+        if (pill) row.appendChild(pill);
+    });
+
+    if (row.children.length === 0) {
+        if (existing) existing.remove();
+        return;
+    }
+
+    if (!existing) {
+        tweetTextDiv.insertBefore(row, tweetTextDiv.firstChild);
+    }
+}
+
+function clipxChainUrls(chain, address) {
+    const isSol = chain === 'sol';
+    const dexChain = isSol ? 'solana' : 'bsc';
+    const gmgnChain = isSol ? 'sol' : 'bsc';
+    return {
+        dex: `https://dexscreener.com/${dexChain}/${address}`,
+        dexEmbed: `https://dexscreener.com/${dexChain}/${address}?embed=1&theme=dark`,
+        gmgn: `https://gmgn.ai/${gmgnChain}/token/${address}`,
+        gmgnAddress: (addr) => `https://gmgn.ai/${gmgnChain}/address/${addr}`,
+        gmgnSwap: `https://gmgn.ai/swap?theme=light&chain=${gmgnChain}&token_in=${isSol ? 'SOL' : 'BNB'}&token_out=${address}`,
+        gmgnKline: `https://www.gmgn.cc/kline/${gmgnChain}/${address}?theme=dark`,
+        bubble: `https://app.bubblemaps.io/${gmgnChain}/token/${address}`,
+        explorer: isSol ? `https://solscan.io/token/${address}` : `https://bscscan.com/token/${address}`,
+        explorerTx: (hash) => isSol ? `https://solscan.io/tx/${hash}` : `https://bscscan.com/tx/${hash}`,
+        binanceToken: isSol ? null : `https://web3.binance.com/en/token/bsc/${address}`,
+        nativeSymbol: isSol ? 'SOL' : 'BNB',
+    };
+}
+
+function createCashtagLookupPill(ticker, username) {
+    ensureClipxTokenPillStyles();
+    const container = document.createElement('span');
+    container.style.cssText = 'display:inline;vertical-align:baseline;margin:0 0.12em;';
+
+    const isXStock = clipxIsXStockTicker(ticker);
+    const pill = document.createElement('span');
+    pill.className = isXStock
+        ? 'clipx-token-pill-main clipx-token-pill-main--xstock'
+        : 'clipx-token-pill-main';
+    clipxApplyTokenPillStyleToElement(pill);
+    pill.dataset.clipxTicker = ticker;
+    pill.dataset.clipxUsername = username || '';
+    if (isXStock) pill.dataset.clipxIsXstock = '1';
+    if (isXStock) {
+        pill.style.setProperty('--clipx-pill-bg', '#0EA5E9');
+        pill.style.setProperty('--clipx-pill-fg', '#FFFFFF');
+    } else {
+        pill.style.setProperty('--clipx-pill-bg', '#475569');
+        pill.style.setProperty('--clipx-pill-fg', '#F8FAFC');
+    }
+    pill.style.cursor = 'pointer';
+    const lookupBadge = isXStock
+        ? '<span class="clipx-pill-chain-badge">xSTOCK</span>'
+        : '';
+    pill.innerHTML = `<span class="clipx-ticker">$${ticker}</span><span class="clipx-pill-price" data-empty="1"></span><span class="clipx-pill-change" data-empty="1"></span>${lookupBadge}`;
+    pill.title = isXStock
+        ? `Tokenized stock ($${ticker}x on BNB Chain, by Backed Finance) — click to trade via PancakeSwap`
+        : `Click to look up $${ticker} price & details`;
+
+    pill.addEventListener('click', (e) => {
+        clipxHandleCashtagLookupPillClick(pill, e);
+    }, true);
+
+    container.appendChild(pill);
+
+    return container;
+}
+
+function clipxStopOwnClick(e) {
+    if (!e) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+}
+
+function clipxOpenTipBadgeModal(badge, e) {
+    if (!badge) return false;
+    clipxStopOwnClick(e);
+    const username = badge.dataset.username;
+    if (!username) return true;
+    const now = Date.now();
+    if (badge._clipxTipOpeningAt && now - badge._clipxTipOpeningAt < 900) return true;
+    badge._clipxTipOpeningAt = now;
+    console.log('[ClipX] Opening modal for:', username);
+    Promise.resolve(createModal(username, 'tip', '', badge))
+        .catch((err) => {
+            console.error('[ClipX] createModal error:', err);
+            const overlay = document.getElementById('clipx-modal-overlay');
+            const modal = overlay && overlay.querySelector('.clipx-modal');
+            if (modal) {
+                modal.innerHTML = `
+                    <div class="clipx-modal-accent" aria-hidden="true"></div>
+                    <div class="clipx-body" style="padding:16px;">
+                        <div style="font-size:13px;font-weight:700;color:#fff;margin-bottom:6px;">Tip panel failed to load</div>
+                        <div style="font-size:11px;color:#a1a1aa;">${err && err.message ? err.message : 'Unknown error'}</div>
+                    </div>
+                `;
             }
+        })
+        .finally(() => {
+            setTimeout(() => { badge._clipxTipOpeningAt = 0; }, 900);
+        });
+    return true;
+}
 
-            lastIndex = regex.lastIndex;
+function clipxOpenTokenPillModal(pill, e) {
+    if (!pill) return false;
+    const ticker = pill.dataset.clipxTicker;
+    if (ticker && !pill.dataset.clipxAddress) {
+        return clipxHandleCashtagLookupPillClick(pill, e);
+    }
+
+    const wrap = pill.closest('.clipx-token-pill-wrap');
+    const address = pill.dataset.clipxAddress || (wrap && wrap.dataset.clipxAddress);
+    if (!address) return false;
+
+    clipxStopOwnClick(e);
+    const symbol = pill.dataset.clipxSymbol || null;
+    const chain = pill.dataset.clipxChain || (wrap && wrap.dataset.chain) || 'bnb';
+    const cachedInfo = (wrap && wrap._clipxTokenInfoCache) || {};
+
+    try {
+        showTradeModal(address, symbol, chain, cachedInfo, pill);
+    } catch (err) {
+        console.error('[ClipX] showTradeModal error:', err);
+    }
+    return true;
+}
+
+function clipxHandleCashtagLookupPillClick(pill, e) {
+    if (!pill) return false;
+    clipxStopOwnClick(e);
+    if (pill.dataset.clipxLookingUp === '1') return true;
+
+    const ticker = (pill.dataset.clipxTicker || '').toUpperCase();
+    const username = pill.dataset.clipxUsername || '';
+    if (!ticker) return true;
+
+    pill.dataset.clipxLookingUp = '1';
+    pill.innerHTML = `<span class="clipx-ticker">$${ticker} …</span>`;
+    pill.style.opacity = '0.7';
+
+    chrome.runtime.sendMessage({ action: 'resolveTickerDexScreener', symbol: ticker }, (r) => {
+        pill.dataset.clipxLookingUp = '0';
+        if (r && r.success && r.address) {
+            const chain = r.chain || 'bnb';
+            window.clipxTokenMap[ticker] = {
+                address: r.address,
+                chain,
+                decimals: r.decimals != null ? r.decimals : (chain === 'sol' ? 9 : 18),
+                name: r.name || ticker,
+                logoURI: r.logoURI || '',
+                isVerified: r.isVerified === true,
+                isXStock: r.isXStock === true,
+                issuer: r.issuer || null,
+                venue: r.venue || null,
+                deployments: Array.isArray(r.deployments) ? r.deployments : null,
+                displaySymbol: r.symbol || ticker,
+                priceUsd: r.priceUsd != null ? r.priceUsd : null,
+                priceChange: typeof r.priceChange === 'number' ? r.priceChange : null,
+                marketCapUsd: r.marketCapUsd != null ? r.marketCapUsd : null,
+                liquidityUsd: r.liquidityUsd != null ? r.liquidityUsd : null,
+                pairCreatedAt: r.pairCreatedAt || null,
+                source: r.source || 'dexscreener'
+            };
+
+            const btn = createBuyButton(username, r.address, ticker, r.isVerified === true, chain, {
+                isXStock: r.isXStock === true,
+                issuer: r.issuer || null,
+                venue: r.venue || null,
+                displaySymbol: r.symbol || ticker,
+                deployments: Array.isArray(r.deployments) ? r.deployments : null,
+                priceUsd: r.priceUsd != null ? r.priceUsd : null,
+                priceChange: typeof r.priceChange === 'number' ? r.priceChange : null,
+                marketCapUsd: r.marketCapUsd != null ? r.marketCapUsd : null,
+                liquidityUsd: r.liquidityUsd != null ? r.liquidityUsd : null,
+                pairCreatedAt: r.pairCreatedAt || null,
+                logoURI: r.logoURI || null,
+                source: r.source || 'ticker'
+            });
+            const container = pill.parentElement;
+            if (container) container.replaceChild(btn, pill);
+            const anchor = btn.querySelector('.clipx-token-pill-main') || btn;
+
+            showTradeModal(r.address, ticker, chain, {
+                success: true,
+                chain,
+                symbol: r.symbol || ticker,
+                name: r.name || ticker,
+                priceUsd: r.priceUsd != null ? String(r.priceUsd) : null,
+                priceChange: typeof r.priceChange === 'number' ? r.priceChange : 0,
+                marketCapUsd: r.marketCapUsd || null,
+                pairCreatedAt: r.pairCreatedAt || null,
+                liquidityUsd: r.liquidityUsd || null,
+                iconUrl: r.logoURI || null,
+                source: r.source || 'ticker'
+            }, anchor);
+        } else {
+            pill.style.opacity = '1';
+            pill.style.setProperty('--clipx-pill-bg', '#334155');
+            pill.style.setProperty('--clipx-pill-fg', '#F8FAFC');
+            pill.innerHTML = `<span class="clipx-ticker">$${ticker} — not found</span>`;
+            pill.title = `$${ticker} not found on BSC or Solana`;
+            pill.style.cursor = 'default';
+        }
+    });
+    return true;
+}
+
+function clipxInstallGlobalClickCatcher() {
+    if (window.__clipxGlobalClickCatcherInstalled) return;
+    window.__clipxGlobalClickCatcherInstalled = true;
+
+    const handler = (e) => {
+        const target = e.target && e.target.nodeType === Node.ELEMENT_NODE ? e.target : null;
+        if (!target) return;
+
+        const tipBadge = target.closest('.clipx-tip-badge');
+        if (tipBadge) {
+            if (Date.now() - (window.__clipxLastModalTriggerAt || 0) < 650) {
+                clipxStopOwnClick(e);
+                return;
+            }
+            const handled = clipxOpenTipBadgeModal(tipBadge, e);
+            if (handled) window.__clipxLastModalTriggerAt = Date.now();
+            return;
         }
 
-        const after = text.slice(lastIndex);
-        if (after) fragment.appendChild(document.createTextNode(after));
+        const pill = target.closest('.clipx-token-pill-main');
+        if (pill) {
+            if (Date.now() - (window.__clipxLastModalTriggerAt || 0) < 650) {
+                clipxStopOwnClick(e);
+                return;
+            }
+            const handled = clipxOpenTokenPillModal(pill, e);
+            if (handled) window.__clipxLastModalTriggerAt = Date.now();
+        }
+    };
 
-        textNode.parentNode.replaceChild(fragment, textNode);
-        console.log('[ClipX] Injected inline buy button');
-    });
+    window.addEventListener('pointerdown', handler, true);
+    window.addEventListener('mousedown', handler, true);
+    window.addEventListener('touchstart', handler, true);
+    window.addEventListener('click', handler, true);
+}
+
+clipxInstallGlobalClickCatcher();
+
+function clipxInjectTokenPillsInTweetText(tweetTextDiv, username) {
+    clipxRenderCashtagPillRow(tweetTextDiv, username);
 }
 
 // Add buttons to timeline
@@ -9726,11 +10959,11 @@ const observer = new MutationObserver(() => {
         // Inject analyze buttons for Intel feature
         try { injectAnalyzeButtons(); } catch (e) { console.error('[ClipX] injectAnalyzeButtons error:', e); }
         // Inject labels on user list pages (followers, following, connect, sidebar, etc.)
-        try { injectUserListLabels(); } catch (e) { console.error('[ClipX] injectUserListLabels error:', e); }
+        injectUserListLabels().catch(e => console.error('[ClipX] injectUserListLabels error:', e));
         // Inject labels on Who to follow / Relevant people sidebar sections
-        try { injectWhoToFollowLabels(); } catch (e) { console.error('[ClipX] injectWhoToFollowLabels error:', e); }
+        injectWhoToFollowLabels().catch(e => console.error('[ClipX] injectWhoToFollowLabels error:', e));
         // Also scan for feed labels (tweets, including quoted post authors)
-        try { ProfileScanner.injectFeedLabels(); } catch (e) { }
+        ProfileScanner.injectFeedLabels().catch(() => { });
 
         // Sorsa v3 scores on circular avatars (timeline + inline feed / user cells)
         try { injectClipxSorsaScoresOnPage(); } catch (e) { console.error('[ClipX] injectClipxSorsaScoresOnPage error:', e); }
@@ -9964,10 +11197,25 @@ function init() {
         };
     }
 
+    if (!window.__clipxSorsaCacheListener) {
+        window.__clipxSorsaCacheListener = true;
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+            if (areaName !== 'local' || !changes[CLIPX_SORSA_SCORE_CACHE_KEY]) return;
+            try {
+                injectClipxSorsaScoresOnPage();
+            } catch (e) {
+                /* ignore */
+            }
+        });
+    }
+
     // Fetch token list first, then add buttons
     chrome.runtime.sendMessage({ action: 'fetchTokenList' }, (response) => {
         if (response && response.success) {
             window.clipxTokenMap = response.tokens;
+            // Force native Solana routing for $SOL even if storage served an
+            // old cached BSC token list before the background cache refreshes.
+            clipxEnsureNativeSolTokenMap();
             console.log('[ClipX] Token list loaded:', Object.keys(window.clipxTokenMap).length);
             console.log('[ClipX] CLIPX in map?', window.clipxTokenMap['CLIPX'] ? 'YES' : 'NO');
 
@@ -9978,7 +11226,7 @@ function init() {
             try { injectAnalyzeButtons(); } catch (e) { console.error('[ClipX] injectAnalyzeButtons error:', e); }
             try { injectCrossPostButtons(); } catch (e) { console.error('[ClipX] injectCrossPostButtons error:', e); }
             // Inject labels on user list pages (followers, following, connect, sidebar, etc.)
-            try { injectUserListLabels(); } catch (e) { console.error('[ClipX] injectUserListLabels error:', e); }
+            injectUserListLabels().catch(e => console.error('[ClipX] injectUserListLabels error:', e));
             try { injectClipxSorsaScoresOnPage(); } catch (e) { console.error('[ClipX] injectClipxSorsaScoresOnPage error:', e); }
         } else {
             console.error('[ClipX] Failed to load token list');
@@ -9989,7 +11237,7 @@ function init() {
             try { injectAnalyzeButtons(); } catch (e) { console.error('[ClipX] injectAnalyzeButtons error:', e); }
             try { injectCrossPostButtons(); } catch (e) { console.error('[ClipX] injectCrossPostButtons error:', e); }
             // And inject user list labels
-            try { injectUserListLabels(); } catch (e) { console.error('[ClipX] injectUserListLabels error:', e); }
+            injectUserListLabels().catch(e => console.error('[ClipX] injectUserListLabels error:', e));
             try { injectClipxSorsaScoresOnPage(); } catch (e) { console.error('[ClipX] injectClipxSorsaScoresOnPage error:', e); }
         }
     });
@@ -10039,6 +11287,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             document.querySelectorAll('.clipx-feed-label, .clipx-profile-label-badge, .clipx-user-list-label').forEach(el => {
                 applyLabelStyle(el);
             });
+        }
+
+        if (request.tokenPillStyle) {
+            currentTokenPillStyle = clipxNormalizeTokenPillStyle(request.tokenPillStyle);
+            clipxApplyTokenPillStyleToExisting();
         }
 
         // Handle Market Insight
@@ -11440,7 +12693,7 @@ function renderHypeTokenCard(token, isRising = false) {
     return `
         <div style="background: #1a1d21; border-radius: 8px; padding: 10px; cursor: pointer; transition: all 0.2s; border: 1px solid transparent;" 
              onmouseenter="this.style.borderColor='#f97316'" onmouseleave="this.style.borderColor='transparent'"
-             onclick="window.open('https://web3.binance.com/en/token/bsc/${address}', '_blank')">
+             onclick="window.open('${address.startsWith('0x') ? `https://web3.binance.com/en/token/bsc/${address}` : `https://solscan.io/token/${address}`}', '_blank')">
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">
                 ${logo ? `<img src="" data-proxy-src="${logo}" style="width: 24px; height: 24px; border-radius: 50%; display: none;" onerror="this.style.display='none'">` : '<div style="width: 24px; height: 24px; border-radius: 50%; background: #2f3336; display: flex; align-items: center; justify-content: center; font-size: 10px;">?</div>'}
                 <div style="font-weight: 700; font-size: 13px; color: #e7e9ea;">${symbol}</div>
@@ -11526,7 +12779,7 @@ function renderMindshareTreemap(tokens) {
         // Inner Content Styling: Top-Left Text, Bottom-Right Logo
         return `
             <div style="background: ${bgColor}; border-radius: 6px; padding: 10px; position: relative; cursor: pointer; transition: all 0.2s; ${spanClass} overflow: hidden; display: flex; flex-direction: column; justify-content: flex-start; align-items: flex-start;"
-                 onclick="window.open('https://web3.binance.com/en/token/bsc/${meta.contractAddress}', '_blank')"
+                 onclick="window.open('${(meta.contractAddress || '').startsWith('0x') ? `https://web3.binance.com/en/token/bsc/${meta.contractAddress}` : `https://solscan.io/token/${meta.contractAddress}`}', '_blank')"
                  onmouseenter="this.style.opacity='0.9'" onmouseleave="this.style.opacity='1'">
                 
                 <!-- Watermark Logo -->

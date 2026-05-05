@@ -1,34 +1,177 @@
 // ClipX Tipping Assistant - Background Service Worker
 importScripts('../lib/ethers.js');
 
-/** Production API only; `apiBase` in storage is normalized to this (no localhost). */
 const PRODUCTION_API_BASE = 'https://clipx.app';
+const DEV_API_BASE = 'http://localhost:3000';
 let API_BASE = PRODUCTION_API_BASE;
+let _clipxDevMode = false;
 
-function normalizeApiBase(v) {
-    if (typeof v !== 'string' || !v.trim()) return PRODUCTION_API_BASE;
+function normalizeApiBase(v, devMode) {
+    const fallback = devMode ? DEV_API_BASE : PRODUCTION_API_BASE;
+    if (typeof v !== 'string' || !v.trim()) return fallback;
     try {
         const u = new URL(v);
-        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') return PRODUCTION_API_BASE;
-        return v.replace(/\/$/, '') || PRODUCTION_API_BASE;
+        if (!devMode && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return PRODUCTION_API_BASE;
+        return v.replace(/\/$/, '') || fallback;
     } catch {
-        return PRODUCTION_API_BASE;
+        return fallback;
     }
 }
 
-/** Auth sync always targets production (clipx.app). */
-function apiBaseFromAuthOrigin(_origin) {
+/**
+ * If apiBase was never set, optionally adopt local dev when `npm run dev` is up (surf health).
+ * Production users keep clipx.app.
+ */
+async function maybeAutoSelectLocalDevApi() {
+    try {
+        const bases = ['http://127.0.0.1:3000', 'http://localhost:3000'];
+        for (const origin of bases) {
+            const ac = new AbortController();
+            const timer = setTimeout(() => ac.abort(), 1500);
+            try {
+                const r = await fetch(`${origin}/api/social-intel/health`, {
+                    signal: ac.signal,
+                    headers: { Accept: 'application/json' },
+                });
+                clearTimeout(timer);
+                if (!r.ok) continue;
+                const j = await r.json();
+                if (
+                    j &&
+                    j.ok === true &&
+                    typeof j.upstreamBase === 'string' &&
+                    /surf/i.test(j.upstreamBase)
+                ) {
+                    const normalized = normalizeApiBase(origin, true);
+                    API_BASE = normalized;
+                    _clipxDevMode = true;
+                    await new Promise((res) =>
+                        chrome.storage.local.set({ apiBase: normalized, clipxDevMode: true }, res)
+                    );
+                    sentimentDetailCache.clear();
+                    sentimentDetailInflight.clear();
+                    console.log('[ClipX Background] Auto-selected local dev API_BASE:', API_BASE);
+                    return;
+                }
+            } catch {
+                clearTimeout(timer);
+            }
+        }
+    } catch {
+        /* ignore */
+    }
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: controller.signal });
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+async function readApiResponse(res) {
+    const text = await res.text();
+    if (!text) return null;
+    try {
+        return JSON.parse(text);
+    } catch {
+        return text;
+    }
+}
+
+function apiErrorMessage(prefix, res, payload) {
+    const detail = typeof payload === 'string'
+        ? payload
+        : (payload && (payload.error || payload.message || payload.reason));
+    const suffix = detail ? `: ${detail}` : ` (HTTP ${res.status})`;
+    return `${prefix}${suffix}`;
+}
+
+function getErrorMessage(error, fallback = 'Swap failed') {
+    return error?.reason ||
+        error?.shortMessage ||
+        error?.info?.error?.message ||
+        error?.error?.message ||
+        error?.message ||
+        fallback;
+}
+
+function parsePositiveDecimal(value, label) {
+    const num = Number(value);
+    if (!Number.isFinite(num) || num <= 0) {
+        throw new Error(`Enter a valid ${label}.`);
+    }
+    return num;
+}
+
+function slippageToBps(slippage, fallbackBps = 100) {
+    const pct = Number(slippage);
+    if (!Number.isFinite(pct) || pct <= 0) return fallbackBps;
+    return Math.max(1, Math.round(pct * 100));
+}
+
+function apiBaseFromAuthOrigin(origin) {
+    try {
+        const u = new URL(origin);
+        if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+            return `${u.protocol}//${u.host}`;
+        }
+    } catch { }
     return PRODUCTION_API_BASE;
 }
 
-// Initialize API_BASE from storage; migrate any old localhost dev URL to production
-chrome.storage.local.get(['apiBase'], (result) => {
-    const next = normalizeApiBase(result.apiBase);
-    API_BASE = next;
-    if (result.apiBase !== next) {
-        chrome.storage.local.set({ apiBase: next });
+function clipxStoredApiLooksLocal(raw) {
+    if (typeof raw !== 'string' || !raw.trim()) return true;
+    try {
+        const u = new URL(raw.trim());
+        return u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+    } catch {
+        return false;
     }
-    console.log('[ClipX Background] API_BASE initialized to:', API_BASE);
+}
+
+chrome.storage.local.get(['apiBase', 'clipxDevMode', 'clipxProdApiDefaultApplied'], (result) => {
+    let dev = result.clipxDevMode === true;
+    let raw = typeof result.apiBase === 'string' ? result.apiBase.trim() : '';
+
+    /** One-time: older builds persisted localhost + dev for all installs */
+    let didMigrateLocalDefault = false;
+    if (!result.clipxProdApiDefaultApplied && clipxStoredApiLooksLocal(raw)) {
+        dev = false;
+        raw = PRODUCTION_API_BASE;
+        didMigrateLocalDefault = true;
+        chrome.storage.local.set({
+            apiBase: PRODUCTION_API_BASE,
+            clipxDevMode: false,
+            clipxProdApiDefaultApplied: true,
+        });
+    } else if (!result.clipxProdApiDefaultApplied) {
+        chrome.storage.local.set({ clipxProdApiDefaultApplied: true });
+    }
+
+    _clipxDevMode = dev;
+    const next = normalizeApiBase(raw || (dev ? DEV_API_BASE : PRODUCTION_API_BASE), dev);
+    API_BASE = next;
+
+    if (!didMigrateLocalDefault) {
+        const patch = {};
+        if (result.apiBase !== next) patch.apiBase = next;
+        if (result.clipxDevMode !== dev) patch.clipxDevMode = dev;
+        if (Object.keys(patch).length) chrome.storage.local.set(patch);
+    }
+
+    console.log('[ClipX Background] API_BASE initialized to:', API_BASE, _clipxDevMode ? '(dev)' : '');
+    if (typeof result.apiBase !== 'string' || !result.apiBase.trim()) {
+        void maybeAutoSelectLocalDevApi();
+    }
+    chrome.storage.local.get(['extensionPriorityVerifiedTokens'], (r2) => {
+        const ov = r2.extensionPriorityVerifiedTokens;
+        if (ov && typeof ov === 'object') clipxRebuildEffectivePriorityTokens(ov);
+        clipxRefreshPriorityVerifiedFromBackend();
+    });
 });
 
 // Four.Meme Contract Addresses
@@ -37,6 +180,100 @@ const FOURMEME_HELPER3 = '0xF251F83e40a78868FcfA3FA4599Dad6494E46034';
 const FOURMEME_TOKEN_MANAGER_V1 = '0xEC4549caDcE5DA21Df6E6422d448034B5233bFbC'; // Legacy support
 
 let unlockedWallet = null;
+
+// ─── Solana Base58 + Ed25519 Wallet Utilities ────────────────────────────
+
+const _B58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const _B58_BASE_MAP = new Uint8Array(256).fill(255);
+for (let i = 0; i < _B58_ALPHABET.length; i++) _B58_BASE_MAP[_B58_ALPHABET.charCodeAt(i)] = i;
+
+function bs58encode(bytes) {
+    const digits = [0];
+    for (const byte of bytes) {
+        let carry = byte;
+        for (let j = 0; j < digits.length; j++) {
+            carry += digits[j] << 8;
+            digits[j] = carry % 58;
+            carry = (carry / 58) | 0;
+        }
+        while (carry > 0) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+    }
+    let str = '';
+    for (let i = 0; i < bytes.length && bytes[i] === 0; i++) str += '1';
+    for (let i = digits.length - 1; i >= 0; i--) str += _B58_ALPHABET[digits[i]];
+    return str;
+}
+
+function bs58decode(str) {
+    const bytes = [0];
+    for (const ch of str) {
+        const val = _B58_BASE_MAP[ch.charCodeAt(0)];
+        if (val === 255) throw new Error('Invalid base58 character');
+        let carry = val;
+        for (let j = 0; j < bytes.length; j++) {
+            carry += bytes[j] * 58;
+            bytes[j] = carry & 0xff;
+            carry >>= 8;
+        }
+        while (carry > 0) { bytes.push(carry & 0xff); carry >>= 8; }
+    }
+    for (let i = 0; i < str.length && str[i] === '1'; i++) bytes.push(0);
+    return new Uint8Array(bytes.reverse());
+}
+
+function isValidSolPublicKey(value) {
+    try {
+        return typeof value === 'string' && bs58decode(value).length === 32;
+    } catch {
+        return false;
+    }
+}
+
+let unlockedSolWallet = null; // { publicKey: Uint8Array(32), secretKey: Uint8Array(64), address: string, cryptoKey: CryptoKey }
+
+async function solGenerateKeypair() {
+    const keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+    const privRaw = new Uint8Array(await crypto.subtle.exportKey('pkcs8', keyPair.privateKey));
+    // PKCS#8 Ed25519: last 32 bytes = seed, pubkey must be derived
+    const seed = privRaw.slice(privRaw.length - 32);
+    const pubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
+    const secretKey = new Uint8Array(64);
+    secretKey.set(seed, 0);
+    secretKey.set(pubRaw, 32);
+    return { publicKey: pubRaw, secretKey, address: bs58encode(pubRaw), cryptoKey: keyPair.privateKey };
+}
+
+async function solImportKeypair(secretKeyBase58) {
+    const raw = bs58decode(secretKeyBase58);
+    if (raw.length !== 64) throw new Error('Invalid Solana secret key (expected 64 bytes)');
+    const seed = raw.slice(0, 32);
+    const pubKey = raw.slice(32);
+    const cryptoKey = await crypto.subtle.importKey(
+        'pkcs8',
+        _solBuildPkcs8(seed),
+        { name: 'Ed25519' },
+        false,
+        ['sign']
+    );
+    return { publicKey: pubKey, secretKey: raw, address: bs58encode(pubKey), cryptoKey };
+}
+
+function _solBuildPkcs8(seed32) {
+    // Ed25519 PKCS#8 DER wrapper: 16-byte prefix + 32-byte seed
+    const prefix = new Uint8Array([
+        0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06,
+        0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20
+    ]);
+    const out = new Uint8Array(prefix.length + seed32.length);
+    out.set(prefix, 0);
+    out.set(seed32, prefix.length);
+    return out.buffer;
+}
+
+async function solSignMessage(cryptoKey, message) {
+    const sig = await crypto.subtle.sign({ name: 'Ed25519' }, cryptoKey, message);
+    return new Uint8Array(sig);
+}
 
 // Cache for KOL data to avoid repeated API calls
 let kolCache = null;
@@ -99,13 +336,15 @@ async function getOrFetchSentimentDetail(handleLower) {
 }
 
 chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'local' || !changes.apiBase) return;
-    const v = changes.apiBase.newValue;
+    if (areaName !== 'local') return;
+    if (changes.clipxDevMode) _clipxDevMode = changes.clipxDevMode.newValue === true;
+    if (!changes.apiBase && !changes.clipxDevMode) return;
+    const v = changes.apiBase ? changes.apiBase.newValue : API_BASE;
     if (typeof v === 'string' && v) {
-        API_BASE = normalizeApiBase(v);
-        if (API_BASE !== v) chrome.storage.local.set({ apiBase: API_BASE });
+        API_BASE = normalizeApiBase(v, _clipxDevMode);
+        if (changes.apiBase && API_BASE !== v) chrome.storage.local.set({ apiBase: API_BASE });
     } else {
-        API_BASE = PRODUCTION_API_BASE;
+        API_BASE = _clipxDevMode ? DEV_API_BASE : PRODUCTION_API_BASE;
     }
     sentimentDetailCache.clear();
     sentimentDetailInflight.clear();
@@ -119,9 +358,57 @@ async function clearExpiredAuthToken() {
     chrome.runtime.sendMessage({ action: 'authExpired' }).catch(() => { });
 }
 
+async function getNativeWalletState() {
+    const local = await chrome.storage.local.get(['nativeWallet', 'walletPrivateKey', 'userAddress']);
+    let address = local.nativeWallet?.address || null;
+    const privateKey = local.walletPrivateKey || local.nativeWallet?.privateKey || null;
+
+    if (!address && privateKey) {
+        try {
+            address = new ethers.Wallet(privateKey).address;
+        } catch (e) {
+            console.warn('[ClipX Background] Failed to derive native wallet address:', e);
+        }
+    }
+
+    const hasWallet = !!(unlockedWallet || address || privateKey || local.nativeWallet?.encrypted);
+    return { ...local, address, privateKey, hasWallet };
+}
+
+function createEvmWalletFromSecret(secret) {
+    const value = String(secret || '').trim();
+    if (!value) throw new Error('Enter a BSC private key or seed phrase.');
+    if (value.includes(' ')) {
+        if (ethers.Wallet.fromPhrase) return ethers.Wallet.fromPhrase(value);
+        if (ethers.Wallet.fromMnemonic) return ethers.Wallet.fromMnemonic(value);
+        throw new Error('Seed phrase import is not supported by this wallet library.');
+    }
+    return new ethers.Wallet(value);
+}
+
+async function persistNativeWallet(wallet, password) {
+    const encryptedJson = password ? await wallet.encrypt(password) : undefined;
+    const nativeWallet = {
+        address: wallet.address,
+        ...(encryptedJson ? { encrypted: encryptedJson } : {})
+    };
+    unlockedWallet = wallet;
+    await chrome.storage.local.set({
+        authToken: 'native-wallet',
+        nativeWallet,
+        userAddress: wallet.address,
+        walletPrivateKey: wallet.privateKey
+    });
+    await chrome.storage.session.set({
+        unlockedPrivateKey: wallet.privateKey,
+        walletUnlocked: true
+    });
+    return nativeWallet;
+}
+
 // Auto-unlock helper - tries session first, then persistent storage
 async function ensureWalletUnlocked() {
-    if (unlockedWallet) return; // Already unlocked
+    if (unlockedWallet) return true; // Already unlocked
 
     try {
         // First try session storage (for current browser session)
@@ -129,7 +416,7 @@ async function ensureWalletUnlocked() {
         if (session.walletUnlocked && session.unlockedPrivateKey) {
             unlockedWallet = new ethers.Wallet(session.unlockedPrivateKey);
             console.log('[ClipX Background] Auto-unlocked wallet from session');
-            return;
+            return true;
         }
 
         // Fallback: Check persistent storage for unencrypted wallet (legacy or after first unlock)
@@ -138,28 +425,66 @@ async function ensureWalletUnlocked() {
         // If there's a stored private key (user opted for "remember"), use it
         if (local.walletPrivateKey) {
             unlockedWallet = new ethers.Wallet(local.walletPrivateKey);
+            const nativeWallet = { ...(local.nativeWallet || {}), address: unlockedWallet.address };
             // Also store in session for faster future access
-            chrome.storage.session.set({
+            await chrome.storage.session.set({
                 unlockedPrivateKey: local.walletPrivateKey,
                 walletUnlocked: true
             });
+            await chrome.storage.local.set({ nativeWallet, userAddress: unlockedWallet.address });
             console.log('[ClipX Background] Auto-unlocked wallet from persistent storage');
-            return;
+            return true;
         }
 
         // If there's an unencrypted native wallet (legacy support)
         if (local.nativeWallet && local.nativeWallet.privateKey) {
             unlockedWallet = new ethers.Wallet(local.nativeWallet.privateKey);
-            chrome.storage.session.set({
+            await chrome.storage.session.set({
                 unlockedPrivateKey: local.nativeWallet.privateKey,
                 walletUnlocked: true
             });
+            await chrome.storage.local.set({
+                nativeWallet: { ...local.nativeWallet, address: unlockedWallet.address },
+                userAddress: unlockedWallet.address
+            });
             console.log('[ClipX Background] Auto-unlocked wallet from legacy storage');
-            return;
+            return true;
         }
     } catch (e) {
         console.error('[ClipX Background] Auto-unlock failed:', e);
     }
+    return false;
+}
+
+// Auto-unlock Solana wallet from session or persistent storage
+async function ensureSolWalletUnlocked() {
+    if (unlockedSolWallet) return true;
+    try {
+        const session = await chrome.storage.session.get(['unlockedSolPrivateKey', 'solWalletUnlocked']);
+        if (session.solWalletUnlocked && session.unlockedSolPrivateKey) {
+            unlockedSolWallet = await solImportKeypair(session.unlockedSolPrivateKey);
+            console.log('[ClipX Background] Auto-unlocked SOL wallet from session');
+            return true;
+        }
+        const local = await chrome.storage.local.get(['solWallet']);
+        if (local.solWallet && local.solWallet.privateKey) {
+            unlockedSolWallet = await solImportKeypair(local.solWallet.privateKey);
+            await chrome.storage.session.set({
+                unlockedSolPrivateKey: local.solWallet.privateKey,
+                solWalletUnlocked: true
+            });
+            if (local.solWallet.address !== unlockedSolWallet.address) {
+                await chrome.storage.local.set({
+                    solWallet: { ...local.solWallet, address: unlockedSolWallet.address }
+                });
+            }
+            console.log('[ClipX Background] Auto-unlocked SOL wallet from persistent storage');
+            return true;
+        }
+    } catch (e) {
+        console.error('[ClipX Background] SOL auto-unlock failed:', e);
+    }
+    return false;
 }
 
 // ── Binance Square API key encryption helpers (AES-GCM 256, Web Crypto) ──
@@ -354,34 +679,163 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         return true;
     }
     if (request.action === 'fetchTokenInfo') {
-        fetch(`https://api.dexscreener.com/latest/dex/tokens/${request.address}`)
-            .then(res => res.json())
-            .then(data => {
+        const reqChain = request.chain || 'bnb';
+        const dexChainId = reqChain === 'sol' ? 'solana' : 'bsc';
+        const cgPlatform = reqChain === 'sol' ? 'solana' : 'binance-smart-chain';
+
+        (async () => {
+            let result = null;
+
+            // DexScreener — primary source
+            try {
+                const dexRes = await fetchWithTimeout(`https://api.dexscreener.com/latest/dex/tokens/${request.address}`, { headers: { Accept: 'application/json' } });
+                const data = await dexRes.json();
                 if (data.pairs && data.pairs.length > 0) {
                     const vol = (p) => parseFloat((p.volume && p.volume.h24) || 0) || 0;
-                    const bsc = data.pairs.filter((p) => p && p.chainId === 'bsc');
-                    const pool = bsc.length ? bsc : data.pairs;
+                    const chainPairs = data.pairs.filter((p) => p && p.chainId === dexChainId);
+                    const pool = chainPairs.length ? chainPairs : data.pairs;
                     pool.sort((a, b) => vol(b) - vol(a));
                     const pair = pool[0];
-                    sendResponse({
+                    result = {
                         success: true,
+                        chain: pair.chainId === 'solana' ? 'sol' : 'bnb',
                         symbol: pair.baseToken.symbol,
                         name: pair.baseToken.name,
                         priceUsd: pair.priceUsd,
                         priceChange: pair.priceChange ? pair.priceChange.h24 : 0,
-                        // Use FDV or marketCap as an approximation for MC in USD
                         marketCapUsd: pair.fdv || pair.marketCap || null,
-                        // New fields for Risk/Safety check
                         pairCreatedAt: pair.pairCreatedAt || null,
                         liquidityUsd: pair.liquidity ? pair.liquidity.usd : null,
-                        // Optional logo/icon if DexScreener provides one
-                        iconUrl: pair.info && pair.info.imageUrl ? pair.info.imageUrl : null
-                    });
-                } else {
-                    sendResponse({ success: false });
+                        iconUrl: pair.info && pair.info.imageUrl ? pair.info.imageUrl : null,
+                        source: 'dexscreener'
+                    };
                 }
-            })
-            .catch(err => sendResponse({ success: false, error: err.message }));
+            } catch (dexErr) {
+                console.warn('[ClipX] DexScreener fetchTokenInfo failed:', dexErr);
+            }
+
+            // Some newer/meme tokens do not resolve reliably by token endpoint; use symbol search as fallback.
+            if (!result && request.symbol) {
+                try {
+                    const searchRes = await fetchWithTimeout(
+                        `https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(request.symbol)}`,
+                        { headers: { Accept: 'application/json' } }
+                    );
+                    if (searchRes.ok) {
+                        const searchData = await searchRes.json();
+                        const pairs = Array.isArray(searchData.pairs) ? searchData.pairs : [];
+                        const relevant = pairs.filter((p) => {
+                            const sameChain = p && p.chainId === dexChainId;
+                            const exactSymbol = p?.baseToken?.symbol && p.baseToken.symbol.toUpperCase() === String(request.symbol).toUpperCase();
+                            const sameAddress = p?.baseToken?.address && p.baseToken.address.toLowerCase() === String(request.address || '').toLowerCase();
+                            return sameChain && (sameAddress || exactSymbol);
+                        });
+                        relevant.sort((a, b) => {
+                            const liqA = parseFloat(a?.liquidity?.usd || 0) || 0;
+                            const liqB = parseFloat(b?.liquidity?.usd || 0) || 0;
+                            return liqB - liqA;
+                        });
+                        const pair = relevant[0];
+                        if (pair) {
+                            result = {
+                                success: true,
+                                chain: pair.chainId === 'solana' ? 'sol' : 'bnb',
+                                symbol: pair.baseToken.symbol,
+                                name: pair.baseToken.name,
+                                priceUsd: pair.priceUsd,
+                                priceChange: pair.priceChange ? pair.priceChange.h24 : 0,
+                                marketCapUsd: pair.fdv || pair.marketCap || null,
+                                pairCreatedAt: pair.pairCreatedAt || null,
+                                liquidityUsd: pair.liquidity ? pair.liquidity.usd : null,
+                                iconUrl: pair.info && pair.info.imageUrl ? pair.info.imageUrl : null,
+                                source: 'dexscreener-search'
+                            };
+                        }
+                    }
+                } catch (searchErr) {
+                    console.warn('[ClipX] DexScreener symbol fallback failed:', searchErr);
+                }
+            }
+
+            // CoinGecko enrichment — get verified price + market cap
+            try {
+                const cgRes = await fetchWithTimeout(
+                    `https://api.coingecko.com/api/v3/coins/${cgPlatform}/contract/${request.address}`,
+                    { headers: { Accept: 'application/json' } }
+                );
+                if (cgRes.ok) {
+                    const cg = await cgRes.json();
+                    const cgPrice = cg.market_data?.current_price?.usd;
+                    const cgMc = cg.market_data?.market_cap?.usd;
+                    const cgChange = cg.market_data?.price_change_percentage_24h;
+                    const cgIcon = cg.image?.small || cg.image?.thumb || null;
+                    if (result) {
+                        if (cgPrice && !result.priceUsd) result.priceUsd = String(cgPrice);
+                        if (cgMc && !result.marketCapUsd) result.marketCapUsd = cgMc;
+                        if (cgChange != null && !result.priceChange) result.priceChange = cgChange;
+                        if (cgIcon && !result.iconUrl) result.iconUrl = cgIcon;
+                        result.cgVerified = true;
+                        result.source = 'dexscreener+coingecko';
+                    } else {
+                        result = {
+                            success: true,
+                            chain: reqChain,
+                            symbol: cg.symbol?.toUpperCase() || '???',
+                            name: cg.name || '',
+                            priceUsd: cgPrice ? String(cgPrice) : null,
+                            priceChange: cgChange || 0,
+                            marketCapUsd: cgMc || null,
+                            pairCreatedAt: null,
+                            liquidityUsd: null,
+                            iconUrl: cgIcon,
+                            cgVerified: true,
+                            source: 'coingecko'
+                        };
+                    }
+                }
+            } catch (cgErr) {
+                // CoinGecko is optional enrichment; don't fail the whole request
+            }
+
+            // CoinMarketCap enrichment via backend proxy — preferred for canonical price/MC.
+            // Overrides DexScreener/CoinGecko when available because CMC is the user-facing source.
+            try {
+                const cmcSymbol = (result && result.symbol) || request.symbol;
+                const cmcQuote = await clipxFetchCmcQuote(cmcSymbol, request.address);
+                if (cmcQuote) {
+                    if (result) {
+                        if (cmcQuote.priceUsd != null) result.priceUsd = String(cmcQuote.priceUsd);
+                        if (cmcQuote.priceChange != null) result.priceChange = cmcQuote.priceChange;
+                        if (cmcQuote.marketCapUsd != null) result.marketCapUsd = cmcQuote.marketCapUsd;
+                        result.cmcVerified = true;
+                        result.source = `${result.source || 'unknown'}+coinmarketcap`;
+                    } else {
+                        result = {
+                            success: true,
+                            chain: reqChain,
+                            symbol: cmcSymbol,
+                            name: cmcSymbol,
+                            priceUsd: cmcQuote.priceUsd != null ? String(cmcQuote.priceUsd) : null,
+                            priceChange: cmcQuote.priceChange || 0,
+                            marketCapUsd: cmcQuote.marketCapUsd || null,
+                            pairCreatedAt: null,
+                            liquidityUsd: null,
+                            iconUrl: null,
+                            cmcVerified: true,
+                            source: 'coinmarketcap'
+                        };
+                    }
+                }
+            } catch (_cmcErr) {
+                // optional enrichment
+            }
+
+            if (result) {
+                sendResponse(result);
+            } else {
+                sendResponse({ success: false });
+            }
+        })();
         return true;
     }
     if (request.action === 'fetchTrendingTokens') {
@@ -622,26 +1076,50 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return;
                 }
                 const w = new ethers.Wallet(row.privateKey);
-                const encryptedJson = await w.encrypt(password);
                 await chrome.storage.session.remove(key);
+                await persistNativeWallet(w, password);
 
-                await chrome.storage.local.set({
-                    authToken: 'native-wallet',
-                    nativeWallet: {
-                        address: w.address,
-                        encrypted: encryptedJson,
-                    },
-                    userAddress: w.address,
-                });
+                sendResponse({ success: true, address: w.address });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
 
-                unlockedWallet = new ethers.Wallet(row.privateKey);
-                await chrome.storage.session.set({
-                    unlockedPrivateKey: row.privateKey,
-                    walletUnlocked: true,
-                });
-                await chrome.storage.local.set({ walletPrivateKey: row.privateKey });
+    if (request.action === 'clipxImportNativeWallet') {
+        (async () => {
+            try {
+                const wallet = createEvmWalletFromSecret(request.privateKey || request.secret || request.phrase);
+                await persistNativeWallet(wallet, request.password || '');
+                sendResponse({ success: true, address: wallet.address });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
 
-                sendResponse({ success: true });
+    if (request.action === 'clipxExportNativeWallet') {
+        (async () => {
+            try {
+                const stored = await chrome.storage.local.get(['walletPrivateKey', 'nativeWallet']);
+                if (stored.walletPrivateKey) {
+                    const wallet = new ethers.Wallet(stored.walletPrivateKey);
+                    sendResponse({ success: true, address: wallet.address, privateKey: wallet.privateKey });
+                    return;
+                }
+                if (stored.nativeWallet?.privateKey) {
+                    const wallet = new ethers.Wallet(stored.nativeWallet.privateKey);
+                    sendResponse({ success: true, address: wallet.address, privateKey: wallet.privateKey });
+                    return;
+                }
+                if (stored.nativeWallet?.encrypted && request.password) {
+                    const wallet = await ethers.Wallet.fromEncryptedJson(stored.nativeWallet.encrypted, request.password);
+                    sendResponse({ success: true, address: wallet.address, privateKey: wallet.privateKey });
+                    return;
+                }
+                sendResponse({ success: false, error: 'No exportable BSC key found. Unlock or import the wallet first.' });
             } catch (e) {
                 sendResponse({ success: false, error: e.message || String(e) });
             }
@@ -650,22 +1128,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'unlockWallet') {
-        try {
-            unlockedWallet = new ethers.Wallet(request.privateKey);
-            // Store in session for auto-unlock (current session)
-            chrome.storage.session.set({
-                unlockedPrivateKey: request.privateKey,
-                walletUnlocked: true
-            });
-            // Also store in persistent local storage for auto-unlock across restarts
-            // This keeps the wallet "unlocked forever" as user requested
-            chrome.storage.local.set({
-                walletPrivateKey: request.privateKey
-            });
-            sendResponse({ success: true });
-        } catch (e) {
-            sendResponse({ success: false, error: e.message });
-        }
+        (async () => {
+            try {
+                unlockedWallet = new ethers.Wallet(request.privateKey);
+                const stored = await chrome.storage.local.get(['nativeWallet']);
+                const nativeWallet = {
+                    ...(stored.nativeWallet || {}),
+                    address: unlockedWallet.address
+                };
+                // Store in session for auto-unlock (current session)
+                await chrome.storage.session.set({
+                    unlockedPrivateKey: request.privateKey,
+                    walletUnlocked: true
+                });
+                // Also store in persistent local storage for auto-unlock across restarts
+                // This keeps the wallet "unlocked forever" as user requested
+                await chrome.storage.local.set({
+                    walletPrivateKey: request.privateKey,
+                    nativeWallet,
+                    userAddress: unlockedWallet.address
+                });
+                sendResponse({ success: true });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message });
+            }
+        })();
         return true;
     }
 
@@ -679,9 +1166,362 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 
     if (request.action === 'checkWalletStatus') {
-        sendResponse({ isUnlocked: !!unlockedWallet });
+        sendResponse({ isUnlocked: !!unlockedWallet, isSolUnlocked: !!unlockedSolWallet });
         return true;
     }
+
+    // ─── Solana Wallet Actions ─────────────────────────────
+
+    if (request.action === 'clipxGenerateSolWallet') {
+        (async () => {
+            try {
+                const kp = await solGenerateKeypair();
+                const privKeyB58 = bs58encode(kp.secretKey);
+                await chrome.storage.local.set({
+                    solWallet: { address: kp.address, privateKey: privKeyB58 }
+                });
+                unlockedSolWallet = kp;
+                await chrome.storage.session.set({
+                    unlockedSolPrivateKey: privKeyB58,
+                    solWalletUnlocked: true
+                });
+                sendResponse({ success: true, address: kp.address, privateKey: privKeyB58 });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'clipxImportSolWallet') {
+        (async () => {
+            try {
+                const kp = await solImportKeypair(request.privateKey);
+                const privKeyB58 = bs58encode(kp.secretKey);
+                await chrome.storage.local.set({
+                    solWallet: { address: kp.address, privateKey: privKeyB58 }
+                });
+                unlockedSolWallet = kp;
+                await chrome.storage.session.set({
+                    unlockedSolPrivateKey: privKeyB58,
+                    solWalletUnlocked: true
+                });
+                sendResponse({ success: true, address: kp.address });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'lockSolWallet') {
+        unlockedSolWallet = null;
+        chrome.storage.session.remove(['unlockedSolPrivateKey', 'solWalletUnlocked']);
+        sendResponse({ success: true });
+        return true;
+    }
+
+    if (request.action === 'clipxExportSolWallet') {
+        (async () => {
+            try {
+                const stored = await chrome.storage.local.get(['solWallet']);
+                if (stored.solWallet?.privateKey) {
+                    sendResponse({
+                        success: true,
+                        address: stored.solWallet.address,
+                        privateKey: stored.solWallet.privateKey
+                    });
+                } else {
+                    sendResponse({ success: false, error: 'No Solana wallet key found.' });
+                }
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolWalletAddress') {
+        (async () => {
+            await ensureSolWalletUnlocked();
+            if (unlockedSolWallet) {
+                sendResponse({ success: true, address: unlockedSolWallet.address });
+            } else {
+                const local = await chrome.storage.local.get(['solWallet']);
+                if (local.solWallet && local.solWallet.address) {
+                    sendResponse({ success: true, address: local.solWallet.address });
+                } else {
+                    sendResponse({ success: false, error: 'No Solana wallet' });
+                }
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolBalance') {
+        (async () => {
+            try {
+                const addr = request.walletAddress || (unlockedSolWallet && unlockedSolWallet.address);
+                if (!addr) { sendResponse({ success: false, error: 'No SOL address' }); return; }
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/balance/${addr}`, { headers: { Accept: 'application/json' } });
+                const data = await res.json();
+                sendResponse({ success: true, balance: data.balance || '0' });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolTokenBalance') {
+        (async () => {
+            try {
+                const addr = request.walletAddress || (unlockedSolWallet && unlockedSolWallet.address);
+                if (!addr) { sendResponse({ success: false, error: 'No SOL address' }); return; }
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/token-balance/${addr}/${request.tokenAddress}`, { headers: { Accept: 'application/json' } });
+                const data = await res.json();
+                sendResponse({ success: true, balance: data.balance || '0' });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolTokenInfo') {
+        (async () => {
+            try {
+                const mint = request.mint || request.address;
+                if (!mint) { sendResponse({ success: false, error: 'No mint address' }); return; }
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/token/${encodeURIComponent(mint)}`, { headers: { Accept: 'application/json' } });
+                if (!res.ok) { sendResponse({ success: false, error: `HTTP ${res.status}` }); return; }
+                const data = await res.json();
+                sendResponse({ success: true, ...data });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolRisk') {
+        (async () => {
+            try {
+                const mint = request.mint || request.address;
+                if (!mint) { sendResponse({ success: false, error: 'No mint address' }); return; }
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/risk/${encodeURIComponent(mint)}`, { headers: { Accept: 'application/json' } });
+                if (!res.ok) { sendResponse({ success: false, error: `HTTP ${res.status}` }); return; }
+                const data = await res.json();
+                sendResponse({ success: true, ...data });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolTopHolders') {
+        (async () => {
+            try {
+                const mint = request.mint || request.address;
+                if (!mint) { sendResponse({ success: false, error: 'No mint address' }); return; }
+                const limit = request.limit || 10;
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/holders/${encodeURIComponent(mint)}?limit=${limit}`, { headers: { Accept: 'application/json' } });
+                if (!res.ok) { sendResponse({ success: false, error: `HTTP ${res.status}` }); return; }
+                const data = await res.json();
+                sendResponse({ success: true, ...data });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'solSwap') {
+        (async () => {
+            try {
+                await ensureSolWalletUnlocked();
+                if (!unlockedSolWallet) {
+                    const local = await chrome.storage.local.get(['solWallet']);
+                    sendResponse({
+                        success: false,
+                        error: local.solWallet
+                            ? 'Unlock your Solana wallet in the extension popup.'
+                            : 'Create or import a Solana wallet in the extension popup.'
+                    });
+                    return;
+                }
+
+                const { tokenAddress, amount, type, slippage } = request;
+                const swapType = type === 'sell' ? 'sell' : 'buy';
+                if (!isValidSolPublicKey(tokenAddress)) {
+                    sendResponse({ success: false, error: 'Invalid Solana token mint.' });
+                    return;
+                }
+                parsePositiveDecimal(amount, swapType === 'buy' ? 'SOL amount' : 'token amount');
+                const slippageBps = slippageToBps(slippage, 100);
+
+                // Step 1: Get quote from server proxy
+                const quoteRes = await fetchWithTimeout(`${API_BASE}/api/sol/quote`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({
+                        inputMint: swapType === 'buy' ? 'So11111111111111111111111111111111111111112' : tokenAddress,
+                        outputMint: swapType === 'buy' ? tokenAddress : 'So11111111111111111111111111111111111111112',
+                        amount: amount,
+                        slippageBps: slippageBps,
+                        type: swapType
+                    })
+                });
+                const quoteData = await readApiResponse(quoteRes);
+                if (!quoteRes.ok) {
+                    sendResponse({ success: false, error: apiErrorMessage('Solana quote failed', quoteRes, quoteData) });
+                    return;
+                }
+                if (!quoteData || quoteData.error) {
+                    sendResponse({ success: false, error: `Solana quote failed: ${quoteData?.error || 'empty response'}` });
+                    return;
+                }
+
+                // Step 2: Get swap transaction from server
+                const swapRes = await fetchWithTimeout(`${API_BASE}/api/sol/swap`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({
+                        quoteResponse: quoteData,
+                        userPublicKey: unlockedSolWallet.address
+                    })
+                });
+                const swapData = await readApiResponse(swapRes);
+                if (!swapRes.ok) {
+                    sendResponse({ success: false, error: apiErrorMessage('Solana swap build failed', swapRes, swapData) });
+                    return;
+                }
+                if (!swapData || !swapData.transaction) {
+                    sendResponse({ success: false, error: 'Solana swap build failed: missing transaction.' });
+                    return;
+                }
+
+                // Step 3: Deserialize, sign, send
+                const txBytes = Uint8Array.from(atob(swapData.transaction), c => c.charCodeAt(0));
+                const signature = await solSignMessage(unlockedSolWallet.cryptoKey, txBytes);
+
+                // Step 4: Send signed tx to server for broadcast
+                const sendRes = await fetchWithTimeout(`${API_BASE}/api/sol/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({
+                        transaction: btoa(String.fromCharCode(...txBytes)),
+                        signature: btoa(String.fromCharCode(...signature)),
+                        publicKey: unlockedSolWallet.address
+                    })
+                });
+                const sendData = await readApiResponse(sendRes);
+                if (!sendRes.ok) {
+                    sendResponse({ success: false, error: apiErrorMessage('Solana broadcast failed', sendRes, sendData) });
+                    return;
+                }
+                if (sendData.txHash || sendData.signature) {
+                    sendResponse({ success: true, txHash: sendData.txHash || sendData.signature });
+                } else {
+                    sendResponse({ success: false, error: sendData.error || 'Broadcast failed' });
+                }
+            } catch (e) {
+                console.error('[ClipX] solSwap failed:', e);
+                sendResponse({ success: false, error: getErrorMessage(e, 'Solana swap failed') });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'solTransfer') {
+        (async () => {
+            try {
+                await ensureSolWalletUnlocked();
+                if (!unlockedSolWallet) {
+                    sendResponse({ success: false, error: 'Solana wallet not unlocked' });
+                    return;
+                }
+
+                // Build transfer via server, sign locally, broadcast via server
+                const buildRes = await fetchWithTimeout(`${API_BASE}/api/sol/transfer`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({
+                        from: unlockedSolWallet.address,
+                        to: request.recipient,
+                        amount: request.amount,
+                        mint: request.tokenAddress || null
+                    })
+                });
+                if (!buildRes.ok) {
+                    const err = await buildRes.text();
+                    sendResponse({ success: false, error: `Transfer build failed: ${err}` });
+                    return;
+                }
+                const buildData = await buildRes.json();
+
+                const txBytes = Uint8Array.from(atob(buildData.transaction), c => c.charCodeAt(0));
+                const signature = await solSignMessage(unlockedSolWallet.cryptoKey, txBytes);
+
+                const sendRes = await fetchWithTimeout(`${API_BASE}/api/sol/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({
+                        transaction: btoa(String.fromCharCode(...txBytes)),
+                        signature: btoa(String.fromCharCode(...signature)),
+                        publicKey: unlockedSolWallet.address
+                    })
+                });
+                const sendData = await sendRes.json();
+                if (sendData.txHash || sendData.signature) {
+                    sendResponse({ success: true, txHash: sendData.txHash || sendData.signature });
+                } else {
+                    sendResponse({ success: false, error: sendData.error || 'Broadcast failed' });
+                }
+            } catch (e) {
+                console.error('[ClipX] solTransfer failed:', e);
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolWalletAssets') {
+        (async () => {
+            try {
+                await ensureSolWalletUnlocked();
+                const addr = request.walletAddress || (unlockedSolWallet && unlockedSolWallet.address);
+                if (!addr) { sendResponse({ success: false, error: 'No SOL address' }); return; }
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/assets/${addr}`, { headers: { Accept: 'application/json' } });
+                if (!res.ok) { sendResponse({ success: false, error: `HTTP ${res.status}` }); return; }
+                const data = await res.json();
+                sendResponse({ success: true, assets: data.assets || [] });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    if (request.action === 'getSolTradeHistory') {
+        (async () => {
+            try {
+                await ensureSolWalletUnlocked();
+                const addr = request.walletAddress || (unlockedSolWallet && unlockedSolWallet.address);
+                if (!addr) { sendResponse({ success: false, error: 'No SOL address' }); return; }
+                const res = await fetchWithTimeout(`${API_BASE}/api/sol/history/${addr}`, { headers: { Accept: 'application/json' } });
+                if (!res.ok) { sendResponse({ success: false, error: `HTTP ${res.status}` }); return; }
+                const data = await res.json();
+                sendResponse({ success: true, history: data.history || [] });
+            } catch (e) {
+                sendResponse({ success: false, error: e.message || String(e) });
+            }
+        })();
+        return true;
+    }
+
+    // ─── End Solana Actions ─────────────────────────
 
     if (request.action === 'getBnbBalance') {
         handleGetBnbBalance(request, sendResponse);
@@ -715,23 +1555,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     if (request.action === 'getWalletAddress') {
         chrome.storage.local.get(['authToken', 'userAddress', 'webUserAddress', 'walletPrivateKey', 'nativeWallet'], (result) => {
-            // Case 1: User is authenticated via ClipX.app (web login)
-            // In this case, use the web-synced wallet (dashboard wallet)
-            if (result.authToken && result.authToken !== 'native-wallet') {
-                const webWallet = result.userAddress || result.webUserAddress;
-                if (webWallet && webWallet.startsWith('0x')) {
-                    sendResponse({ address: webWallet, type: 'web' });
-                    return;
-                }
-            }
-
-            // Case 2: User is using native wallet (extension-managed wallet)
+            // Native extension wallet is the primary trading identity.
             if (unlockedWallet) {
                 sendResponse({ address: unlockedWallet.address, type: 'native' });
                 return;
             }
 
-            // Case 3: Native wallet exists but is locked - derive address from private key
+            if (result.nativeWallet?.address && result.nativeWallet.address.startsWith('0x')) {
+                sendResponse({ address: result.nativeWallet.address, type: 'native' });
+                return;
+            }
+
             if (result.walletPrivateKey) {
                 try {
                     const wallet = new ethers.Wallet(result.walletPrivateKey);
@@ -742,7 +1576,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
             }
 
-            // Case 4: Fallback to any available address
+            // Fallback to the web dashboard wallet for non-trading reads.
+            const webWallet = result.webUserAddress || result.userAddress;
+            if (result.authToken && result.authToken !== 'native-wallet' && webWallet && webWallet.startsWith('0x')) {
+                sendResponse({ address: webWallet, type: 'web' });
+                return;
+            }
+
             sendResponse({ address: result.userAddress || result.webUserAddress || null, type: 'unknown' });
         });
         return true;
@@ -1969,13 +2809,19 @@ async function handleWalletRequest(request, sendResponse) {
 
         if (method === 'eth_requestAccounts' || method === 'eth_accounts') {
             // Try to get public address from storage even if locked
-            const stored = await chrome.storage.local.get(['userAddress', 'nativeWallet']);
-            const addr = stored.userAddress || (stored.nativeWallet ? stored.nativeWallet.address : null);
+            const stored = await chrome.storage.local.get(['userAddress', 'nativeWallet', 'walletPrivateKey']);
+            let addr = stored.nativeWallet ? stored.nativeWallet.address : null;
+            if (!addr && stored.walletPrivateKey) {
+                try {
+                    addr = new ethers.Wallet(stored.walletPrivateKey).address;
+                } catch { }
+            }
+            if (!addr) addr = stored.userAddress;
 
             if (addr) {
                 sendResponse({ result: [addr] });
             } else {
-                sendResponse({ error: { code: 4001, message: 'Please log in to ClipX extension first' } });
+                sendResponse({ error: { code: 4001, message: 'Create or import a BSC wallet in the ClipX extension first' } });
             }
             return;
         }
@@ -2026,10 +2872,17 @@ async function handleWalletRequest(request, sendResponse) {
     }
 }
 
-// Priority tokens that should always be available for ticker detection
-// BTC/ETH: CoinGecko's BSC index can list multiple contracts per symbol; without priority,
-// $BTC may resolve to an unrelated low-cap "BTC" meme token — wrong DexScreener price.
-const PRIORITY_TOKENS = {
+// Priority tokens — embedded fallback when backend is unreachable. Authoritative map:
+// GET /api/extension/priority-verified-tokens (merged over this via clipxRebuildEffectivePriorityTokens).
+const PRIORITY_TOKENS_FALLBACK = {
+    'SOL': {
+        address: 'So11111111111111111111111111111111111111112', // Wrapped SOL mint (Jupiter uses this for native SOL swaps)
+        chain: 'sol',
+        decimals: 9,
+        name: 'Solana',
+        logoURI: '',
+        isVerified: true
+    },
     'BTC': {
         address: '0x7130d2A12B9BCbfAe4F2634d864A1Ee1Ce3Ead9c', // Binance-Peg BTCB (BSC)
         decimals: 18,
@@ -2081,8 +2934,80 @@ const PRIORITY_TOKENS = {
     }
 };
 
+function clipxClonePriorityFallbackMap() {
+    const o = {};
+    for (const k of Object.keys(PRIORITY_TOKENS_FALLBACK)) {
+        const e = PRIORITY_TOKENS_FALLBACK[k];
+        o[k] = { ...e, chain: e.chain || 'bnb' };
+    }
+    return o;
+}
+
+function clipxNormalizeRemotePriorityEntry(sym, meta) {
+    const chain = meta.chain === 'sol' ? 'sol' : 'bnb';
+    return {
+        address: String(meta.address || '').trim(),
+        chain,
+        decimals: typeof meta.decimals === 'number' ? meta.decimals : (chain === 'sol' ? 9 : 18),
+        name: (meta.name != null && String(meta.name)) || sym,
+        logoURI: (meta.logoURI != null && String(meta.logoURI)) || '',
+        isVerified: meta.isVerified !== false
+    };
+}
+
+function clipxRebuildEffectivePriorityTokens(overlay) {
+    const base = clipxClonePriorityFallbackMap();
+    if (overlay && typeof overlay === 'object') {
+        for (const rawKey of Object.keys(overlay)) {
+            const sym = String(rawKey || '').toUpperCase();
+            const meta = overlay[rawKey];
+            if (!sym || !meta || typeof meta !== 'object' || !meta.address) continue;
+            base[sym] = clipxNormalizeRemotePriorityEntry(sym, meta);
+        }
+    }
+    clipxEffectivePriorityTokens = base;
+}
+
+let clipxEffectivePriorityTokens = clipxClonePriorityFallbackMap();
+
+async function clipxRefreshPriorityVerifiedFromBackend() {
+    const url = `${API_BASE}/api/extension/priority-verified-tokens`;
+    try {
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 8000);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || typeof data.tokens !== 'object') return;
+        await chrome.storage.local.set({
+            extensionPriorityVerifiedTokens: data.tokens,
+            extensionPriorityVerifiedVersion: data.version ?? 0
+        });
+        clipxRebuildEffectivePriorityTokens(data.tokens);
+        console.log('[ClipX Background] priority-verified tokens synced from backend (version ' + String(data.version ?? '?') + ')');
+    } catch (e) {
+        console.warn('[ClipX Background] priority-verified-tokens unreachable:', e);
+    }
+}
+
+const SOLANA_PRIMARY_TICKERS = new Set([
+    'SOL',
+    'TRUMP',
+    'WIF',
+    'BONK',
+    'JUP',
+    'JTO',
+    'PYTH',
+    'RAY',
+    'ORCA',
+    'PENGU',
+    'FARTCOIN',
+    'POPCAT',
+    'PNUT',
+    'MEW',
+    'BOME'
+]);
+
 /** Bump when merge order / source-of-truth changes (invalidates stale cachedTokenList). */
-const TOKEN_LIST_CACHE_VERSION = 3;
+const TOKEN_LIST_CACHE_VERSION = 5; // v5: priority/verified map can be synced from backend
 
 async function handleFetchTokenList(request, sendResponse) {
     try {
@@ -2110,7 +3035,7 @@ async function handleFetchTokenList(request, sendResponse) {
 
         console.log('[ClipX Background] Fetching new token list (cache v' + TOKEN_LIST_CACHE_VERSION + ')...');
 
-        const tokenMap = { ...PRIORITY_TOKENS };
+        const tokenMap = { ...clipxEffectivePriorityTokens };
 
         await clipxMergeCoinGeckoBscIntoTokenMap(tokenMap);
 
@@ -2122,7 +3047,7 @@ async function handleFetchTokenList(request, sendResponse) {
                 data.tokens.forEach((token) => {
                     if (token.chainId !== 56) return;
                     const symbol = token.symbol.toUpperCase();
-                    if (PRIORITY_TOKENS[symbol]) return;
+                    if (clipxEffectivePriorityTokens[symbol]) return;
                     if (tokenMap[symbol]) return;
                     tokenMap[symbol] = {
                         address: token.address,
@@ -2139,7 +3064,7 @@ async function handleFetchTokenList(request, sendResponse) {
         }
 
         console.log('[ClipX Background] Token map loaded with', Object.keys(tokenMap).length, 'tokens');
-        console.log('[ClipX Background] Priority tokens included:', Object.keys(PRIORITY_TOKENS).join(', '));
+        console.log('[ClipX Background] Priority tokens included:', Object.keys(clipxEffectivePriorityTokens).join(', '));
 
         await chrome.storage.local.remove('tickerResolveCache');
 
@@ -2152,7 +3077,7 @@ async function handleFetchTokenList(request, sendResponse) {
         sendResponse({ success: true, tokens: tokenMap });
     } catch (error) {
         console.error('[ClipX Background] Error in handleFetchTokenList:', error);
-        sendResponse({ success: true, tokens: PRIORITY_TOKENS });
+        sendResponse({ success: true, tokens: clipxEffectivePriorityTokens });
     }
 }
 
@@ -2264,7 +3189,7 @@ async function clipxPickBestCoinGeckoCandidate(candidates) {
 }
 
 /**
- * Merge CoinGecko BSC contracts into tokenMap. Call AFTER PRIORITY_TOKENS only.
+ * Merge CoinGecko BSC contracts into tokenMap. Skip symbols in clipxEffectivePriorityTokens.
  * PancakeSwap should only fill symbols missing here so wrong PS addresses don't override CG.
  */
 async function clipxMergeCoinGeckoBscIntoTokenMap(tokenMap) {
@@ -2272,7 +3197,7 @@ async function clipxMergeCoinGeckoBscIntoTokenMap(tokenMap) {
     const symbols = Object.keys(index);
     const multiIds = [];
     for (const sym of symbols) {
-        if (PRIORITY_TOKENS[sym]) continue;
+        if (clipxEffectivePriorityTokens[sym]) continue;
         const cands = index[sym];
         if (cands && cands.length > 1) {
             multiIds.push(...cands.map((c) => c.id));
@@ -2281,7 +3206,7 @@ async function clipxMergeCoinGeckoBscIntoTokenMap(tokenMap) {
     const mcMap = await clipxFetchMarketCapMapForIds(multiIds);
 
     for (const sym of symbols) {
-        if (PRIORITY_TOKENS[sym]) continue;
+        if (clipxEffectivePriorityTokens[sym]) continue;
         const cands = index[sym];
         if (!cands || cands.length === 0) continue;
 
@@ -2314,6 +3239,292 @@ async function clipxMergeCoinGeckoBscIntoTokenMap(tokenMap) {
  * not DexScreener search (which was matching unrelated high-volume pools).
  * Same message action as before: resolveTickerDexScreener.
  */
+function clipxChainFromCmcPayload(item) {
+    const raw = [
+        item.chain,
+        item.network,
+        item.platform && item.platform.slug,
+        item.platform && item.platform.name,
+        item.platformName
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (raw.includes('sol')) return 'sol';
+    return 'bnb';
+}
+
+function clipxAddressFromCmcPayload(item) {
+    return item.address ||
+        item.contractAddress ||
+        item.contract_address ||
+        item.tokenAddress ||
+        (item.platform && (item.platform.token_address || item.platform.address)) ||
+        null;
+}
+
+function clipxNormalizeCmcTickerResult(data, requestedSymbol) {
+    const payload = data && (data.token || data.result || data.data || data);
+    const list = Array.isArray(payload)
+        ? payload
+        : (payload && Array.isArray(payload.tokens) ? payload.tokens : [payload]);
+    const symbol = requestedSymbol.toUpperCase();
+
+    for (const item of list) {
+        if (!item || typeof item !== 'object') continue;
+        const itemSymbol = String(item.symbol || item.ticker || symbol).toUpperCase();
+        if (itemSymbol !== symbol) continue;
+        const address = clipxAddressFromCmcPayload(item);
+        if (!address) continue;
+        const chain = clipxChainFromCmcPayload(item);
+        return {
+            address,
+            chain,
+            symbol,
+            name: item.name || itemSymbol,
+            decimals: item.decimals != null ? item.decimals : (chain === 'sol' ? 9 : 18),
+            logoURI: item.logoURI || item.logo || item.logoUrl || item.iconUrl || '',
+            isVerified: item.isVerified === true || item.verified === true,
+            source: 'coinmarketcap',
+            priceUsd: item.priceUsd || item.price_usd || item.price || null,
+            priceChange: item.priceChange || item.percent_change_24h || item.priceChange24h || 0,
+            marketCapUsd: item.marketCapUsd || item.market_cap || item.marketCap || null,
+            liquidityUsd: item.liquidityUsd || null,
+            iconUrl: item.iconUrl || item.logoURI || item.logo || item.logoUrl || '',
+            ts: Date.now()
+        };
+    }
+    return null;
+}
+
+/**
+ * xStocks (Backed Finance / Ondo tokenized US equities on BNB Chain).
+ * When a $TICKER matches one of these, we resolve it through /api/xstocks/resolve
+ * to a BNB Chain token and trade it through the BNB/PancakeSwap flow.
+ */
+const XSTOCKS_TICKERS = new Set([
+    // Equities
+    'ABT', 'ABBV', 'ACN', 'ADBE', 'GOOGL', 'AMZN', 'AMBR', 'AMD', 'AAPL',
+    'APLD', 'AMAT', 'APP', 'ANET', 'ASML', 'ASTS', 'AZN', 'BAC', 'BRK.B',
+    'BTBT', 'BTGO', 'BMNR', 'AVGO', 'CVX', 'CRCL', 'CSCO', 'CLSK', 'KO',
+    'COIN', 'CMCSA', 'CEG', 'CORZ', 'CRWD', 'DHR', 'DELL', 'DFDV', 'ETN',
+    'LLY', 'UUUU', 'XOM', 'VCX', 'GLXY', 'GME', 'GEV', 'GS', 'HD', 'HON',
+    'HUT', 'INTC', 'IBM', 'JNJ', 'JPM', 'KLAC', 'KRAQ', 'LRCX', 'LIN',
+    'LITE', 'MARA', 'MRVL', 'MA', 'MCD', 'MDT', 'MRK', 'META', 'MU',
+    'MSFT', 'MSTR', 'NFLX', 'NVO', 'SMR', 'NVDA', 'OKLO', 'OPEN', 'ORCL',
+    'PLTR', 'PANW', 'PYPL', 'PEP', 'PFE', 'PM', 'PL', 'PG', 'PWR', 'RIOT',
+    'HOOD', 'RBLX', 'CRM', 'SNDK', 'SBET', 'SMCI', 'TMUS', 'TER', 'WULF',
+    'TSLA', 'TMO', 'TONX', 'TSM', 'UBER', 'UNH', 'USAR', 'VRT', 'SPCE',
+    'V', 'WMT', 'WBD', 'STRC',
+    // ETFs / commodity trusts
+    'PALL', 'PPLT', 'IEMG', 'XLE', 'FGDL', 'COPX', 'URA', 'GLD', 'SGOV',
+    'SLV', 'ITA', 'QQQ', 'IWM', 'IJR', 'SPY', 'XOP', 'TBLL', 'TQQQ',
+    'MOO', 'SMH', 'VGK', 'VUG', 'VXUS', 'VT', 'VTI', 'SCHF'
+]);
+
+/**
+ * Dynamic xStocks catalog synced from the ClipX backend (which itself refreshes
+ * from Jupiter every hour). Stored in chrome.storage.local so content scripts
+ * can read it without re-fetching. Merged with the static seed at runtime.
+ */
+const CLIPX_XSTOCKS_STORAGE_KEY = 'xStocksCatalog';
+const CLIPX_XSTOCKS_REFRESH_INTERVAL_MIN = 60;
+const CLIPX_XSTOCKS_ALARM_NAME = 'clipx-xstocks-refresh';
+let clipxDynamicXStocks = new Set();
+
+function clipxIsXStockTicker(symbol) {
+    const t = String(symbol || '').toUpperCase();
+    return XSTOCKS_TICKERS.has(t) || clipxDynamicXStocks.has(t);
+}
+
+async function clipxLoadXStocksCatalogFromStorage() {
+    try {
+        const stored = await chrome.storage.local.get(CLIPX_XSTOCKS_STORAGE_KEY);
+        const cat = stored && stored[CLIPX_XSTOCKS_STORAGE_KEY];
+        if (cat && Array.isArray(cat.tickers)) {
+            clipxDynamicXStocks = new Set(cat.tickers.map((t) => String(t).toUpperCase()));
+        }
+    } catch (e) {
+        console.warn('[ClipX Background] xStocks catalog storage read failed:', e);
+    }
+}
+
+async function clipxRefreshXStocksCatalog() {
+    try {
+        const url = `${API_BASE}/api/xstocks/list`;
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 12000);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!data || !Array.isArray(data.tickers)) return;
+        const tickers = data.tickers.map((t) => String(t).toUpperCase());
+        clipxDynamicXStocks = new Set(tickers);
+        const payload = {
+            tickers,
+            entries: data.entries || {},
+            refreshedAt: data.refreshedAt || Date.now(),
+            count: tickers.length,
+            source: data.source || 'unknown',
+            ts: Date.now()
+        };
+        await chrome.storage.local.set({ [CLIPX_XSTOCKS_STORAGE_KEY]: payload });
+        console.log(`[ClipX Background] xStocks catalog refreshed: ${tickers.length} tickers`);
+    } catch (e) {
+        console.warn('[ClipX Background] xStocks catalog refresh failed:', e);
+    }
+}
+
+function clipxScheduleXStocksRefresh() {
+    if (typeof chrome === 'undefined' || !chrome.alarms) return;
+    chrome.alarms.create(CLIPX_XSTOCKS_ALARM_NAME, {
+        delayInMinutes: CLIPX_XSTOCKS_REFRESH_INTERVAL_MIN,
+        periodInMinutes: CLIPX_XSTOCKS_REFRESH_INTERVAL_MIN
+    });
+    if (chrome.alarms.onAlarm && !clipxScheduleXStocksRefresh._wired) {
+        clipxScheduleXStocksRefresh._wired = true;
+        chrome.alarms.onAlarm.addListener((alarm) => {
+            if (alarm && alarm.name === CLIPX_XSTOCKS_ALARM_NAME) {
+                clipxRefreshXStocksCatalog();
+            }
+        });
+    }
+}
+
+(async () => {
+    await clipxLoadXStocksCatalogFromStorage();
+    clipxRefreshXStocksCatalog();
+    clipxScheduleXStocksRefresh();
+})();
+
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onStartup) {
+    chrome.runtime.onStartup.addListener(() => {
+        clipxRefreshXStocksCatalog();
+        clipxScheduleXStocksRefresh();
+    });
+}
+
+/**
+ * Resolve a base stock ticker (e.g. "AAPL") to its BNB Chain xStock token
+ * via the ClipX backend proxy. Returns a normalized resolver record on success
+ * (including `isXStock: true`), or null when the ticker isn't an xStock or the
+ * backend can't find it.
+ */
+async function clipxResolveTickerViaXStocksProxy(symbol, preferChain) {
+    const upper = String(symbol || '').toUpperCase();
+    // Product rule: stock/xStock cashtags are BNB Chain only in the extension.
+    // Always ask the backend for the BNB/PancakeSwap deployment.
+    const prefer = 'bnb';
+    const url = `${API_BASE}/api/xstocks/resolve?symbol=${encodeURIComponent(upper)}&chain=${prefer}`;
+    try {
+        const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 7000);
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (!data || !data.address) return null;
+        const resolvedChain = data.chain === 'bnb' ? 'bnb' : null;
+        if (!resolvedChain) return null;
+        return {
+            address: data.address,
+            chain: resolvedChain,
+            symbol: data.symbol || (upper + (data.issuer === 'ondo' ? 'on' : 'x')),
+            baseSymbol: data.baseSymbol || upper,
+            name: data.name || (upper + ' xStock'),
+            decimals: typeof data.decimals === 'number' ? data.decimals : 18,
+            logoURI: data.logoURI || '',
+            isVerified: data.isVerified !== false,
+            isXStock: true,
+            issuer: data.issuer || 'backed',
+            venue: data.venue || 'pancakeswap',
+            deployments: Array.isArray(data.deployments) ? data.deployments : null,
+            source: data.source || 'xstocks',
+            priceUsd: data.priceUsd != null ? data.priceUsd : null,
+            priceChange: data.priceChange != null ? data.priceChange : 0,
+            marketCapUsd: data.marketCapUsd != null ? data.marketCapUsd : null,
+            liquidityUsd: data.liquidityUsd != null ? data.liquidityUsd : null,
+            iconUrl: data.logoURI || '',
+            ts: Date.now()
+        };
+    } catch (e) {
+        console.warn('[ClipX Background] xStocks proxy lookup failed:', e);
+        return null;
+    }
+}
+
+/**
+ * Probe ClipX backend CoinMarketCap proxy.
+ * Distinguishes three outcomes so the resolver can be CMC-first strict
+ * (skip detection on no-match) without breaking when the backend is down.
+ *
+ * Returns:
+ *   { status: 'found', data: <normalized> }  — CMC has it
+ *   { status: 'not_found' }                  — CMC explicitly returned no match
+ *   { status: 'unreachable' }                — Network error / endpoint missing
+ */
+async function clipxResolveTickerViaCoinMarketCapProxy(symbol) {
+    const urls = [
+        `${API_BASE}/api/coinmarketcap/resolve?symbol=${encodeURIComponent(symbol)}`,
+        `${API_BASE}/api/cmc/resolve?symbol=${encodeURIComponent(symbol)}`
+    ];
+
+    let sawHttpResponse = false;
+    let sawNotFound = false;
+
+    for (const url of urls) {
+        try {
+            const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 6500);
+            if (res.status === 404 || res.status === 405 || res.status === 501) {
+                continue;
+            }
+            sawHttpResponse = true;
+            if (!res.ok) {
+                continue;
+            }
+            const data = await res.json();
+            const normalized = clipxNormalizeCmcTickerResult(data, symbol);
+            if (normalized && normalized.address) {
+                return { status: 'found', data: normalized };
+            }
+            sawNotFound = true;
+        } catch (e) {
+            console.warn('[ClipX Background] CoinMarketCap proxy lookup failed:', e);
+        }
+    }
+
+    if (sawNotFound) return { status: 'not_found' };
+    if (sawHttpResponse) return { status: 'not_found' };
+    return { status: 'unreachable' };
+}
+
+/**
+ * Best-effort CMC quote lookup for an already-resolved token.
+ * Used to enrich price/MC for known crypto tokens. Returns null if proxy unreachable.
+ */
+async function clipxFetchCmcQuote(symbol, address) {
+    if (!symbol) return null;
+    const params = new URLSearchParams({ symbol });
+    if (address) params.set('address', address);
+    const urls = [
+        `${API_BASE}/api/coinmarketcap/quote?${params.toString()}`,
+        `${API_BASE}/api/cmc/quote?${params.toString()}`
+    ];
+    for (const url of urls) {
+        try {
+            const res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, 5000);
+            if (res.status === 404 || res.status === 405 || res.status === 501) continue;
+            if (!res.ok) continue;
+            const data = await res.json();
+            const payload = data && (data.quote || data.data || data);
+            if (!payload || typeof payload !== 'object') continue;
+            const priceUsd = payload.priceUsd || payload.price_usd || payload.price || null;
+            if (priceUsd == null) continue;
+            return {
+                priceUsd,
+                priceChange: payload.percent_change_24h || payload.priceChange24h || payload.priceChange || 0,
+                marketCapUsd: payload.market_cap || payload.marketCap || payload.marketCapUsd || null,
+                source: 'coinmarketcap'
+            };
+        } catch (e) {
+            console.warn('[ClipX Background] CoinMarketCap quote failed:', e);
+        }
+    }
+    return null;
+}
+
 async function handleResolveTickerDexScreener(request, sendResponse) {
     const symbol = (request.symbol || '').trim().toUpperCase();
     if (!symbol || symbol.length < 2 || symbol.length > 20) {
@@ -2321,14 +3532,16 @@ async function handleResolveTickerDexScreener(request, sendResponse) {
         return;
     }
 
-    const priority = PRIORITY_TOKENS[symbol];
+    const priority = clipxEffectivePriorityTokens[symbol];
     if (priority && priority.address) {
+            const priorityChain = priority.chain || 'bnb';
         sendResponse({
             success: true,
+                chain: priorityChain,
             address: priority.address,
             symbol,
             name: priority.name || symbol,
-            decimals: priority.decimals != null ? priority.decimals : 18,
+                decimals: priority.decimals != null ? priority.decimals : (priorityChain === 'sol' ? 9 : 18),
             logoURI: priority.logoURI || '',
             isVerified: !!priority.isVerified,
             source: 'priority'
@@ -2343,62 +3556,276 @@ async function handleResolveTickerDexScreener(request, sendResponse) {
     try {
         const stored = await chrome.storage.local.get('tickerResolveCache');
         const tickerResolveCache = { ...(stored.tickerResolveCache || {}) };
-        const hit = tickerResolveCache[symbol];
+        let hit = tickerResolveCache[symbol];
+        const preferSolana = SOLANA_PRIMARY_TICKERS.has(symbol);
 
-        if (hit && hit.miss && (now - hit.ts < MISS_TTL)) {
+        if (symbol === 'SOL' && hit && hit.address && hit.chain !== 'sol') {
+            delete tickerResolveCache[symbol];
+            await chrome.storage.local.set({ tickerResolveCache });
+        }
+
+        // Skip stale notCrypto cache entries for newly-supported xStock tickers
+        // so we re-resolve them via the xStocks path on the next request.
+        const isStaleNotCryptoForXStock = hit && hit.miss && hit.notCrypto && clipxIsXStockTicker(symbol) && !hit.isXStock;
+        const isStaleXStockCache =
+            hit &&
+            clipxIsXStockTicker(symbol) &&
+            (
+                hit.miss ||
+                hit.chain !== 'bnb' ||
+                hit.issuer !== 'backed' ||
+                /on$/i.test(String(hit.symbol || '')) ||
+                !hit.isXStock
+            );
+        if (isStaleXStockCache) {
+            delete tickerResolveCache[symbol];
+            await chrome.storage.local.set({ tickerResolveCache });
+            hit = null;
+        }
+        if (hit && hit.miss && !isStaleNotCryptoForXStock && (now - hit.ts < MISS_TTL)) {
             sendResponse({ success: false, error: 'not found (cached)' });
             return;
         }
-        if (hit && !hit.miss && hit.address && (now - hit.ts < HIT_TTL)) {
+        // Invalidate stale memecoin cache entries for tickers now in the xStock catalog.
+        // Pre-xStocks integration, $NVDA / $TSLA etc. were resolving to random low-liquidity
+        // memecoins on Solana. After integration, the same ticker should resolve to the
+        // tokenized stock — so we drop the stale entry and force a re-resolve.
+        if (hit && !hit.miss && hit.address && !hit.isXStock && clipxIsXStockTicker(symbol)) {
+            delete tickerResolveCache[symbol];
+            await chrome.storage.local.set({ tickerResolveCache });
+        }
+        const hitHasMarketData = hit && (hit.priceUsd || hit.marketCapUsd || hit.liquidityUsd);
+        const cacheHitStillValid = hit && !hit.miss && hit.address && !(hit.address && !hit.isXStock && clipxIsXStockTicker(symbol));
+        if (cacheHitStillValid && (now - hit.ts < HIT_TTL) && hitHasMarketData && !(preferSolana && hit.chain !== 'sol')) {
             sendResponse({
                 success: true,
+                chain: hit.chain || 'bnb',
                 address: hit.address,
                 symbol: hit.symbol || symbol,
                 name: hit.name || symbol,
                 decimals: hit.decimals != null ? hit.decimals : 18,
                 logoURI: hit.logoURI || '',
                 isVerified: !!hit.isVerified,
-                source: hit.source || 'coingecko'
+                isXStock: !!hit.isXStock,
+                baseSymbol: hit.baseSymbol || null,
+                source: hit.source || 'coingecko',
+                priceUsd: hit.priceUsd || null,
+                priceChange: hit.priceChange || 0,
+                marketCapUsd: hit.marketCapUsd || null,
+                pairCreatedAt: hit.pairCreatedAt || null,
+                liquidityUsd: hit.liquidityUsd || null,
+                iconUrl: hit.iconUrl || hit.logoURI || ''
             });
             return;
         }
 
-        const index = await clipxLoadCoinGeckoBscIndex();
-        const candidates = index[symbol] || [];
+        const isCatalogXStock = clipxIsXStockTicker(symbol);
+        const isStockShaped = /^[A-Z][A-Z.]{0,4}$/.test(symbol);
 
-        if (candidates.length === 0) {
-            tickerResolveCache[symbol] = { ts: now, miss: true };
+        // Known xStocks must resolve from the official xStocks proxy first.
+        // CMC can surface Ondo tickers (AAPLon, etc.), which are explicitly not
+        // supported in this extension flow.
+        if (isCatalogXStock) {
+            const xResult = await clipxResolveTickerViaXStocksProxy(symbol);
+            if (xResult && xResult.address) {
+                tickerResolveCache[symbol] = { ...xResult };
+                await chrome.storage.local.set({ tickerResolveCache });
+                sendResponse({ success: true, ...xResult });
+                return;
+            }
+
+            const pendingTtl = 5 * 60 * 1000; // 5 min — short so we retry once backend is up
+            tickerResolveCache[symbol] = {
+                ts: now,
+                miss: true,
+                isXStock: true,
+                xStockPending: true,
+                expiresIn: pendingTtl
+            };
             await chrome.storage.local.set({ tickerResolveCache });
-            sendResponse({ success: false, error: 'No BSC token in CoinGecko list for symbol' });
+            sendResponse({
+                success: false,
+                isXStock: true,
+                xStockPending: true,
+                error: 'xStock backend pending (no fallback to CoinMarketCap/DexScreener for known stock tickers)'
+            });
             return;
         }
 
-        const best = await clipxPickBestCoinGeckoCandidate(candidates);
-        const checksumAddress = best.address;
+        const cmcOutcome = await clipxResolveTickerViaCoinMarketCapProxy(symbol);
+        if (cmcOutcome.status === 'found') {
+            const cmcData = cmcOutcome.data;
+            tickerResolveCache[symbol] = { ...cmcData };
+            await chrome.storage.local.set({ tickerResolveCache });
+            sendResponse({ success: true, ...cmcData });
+            return;
+        }
 
-        const out = {
-            address: checksumAddress,
-            symbol,
-            name: best.name || symbol,
-            decimals: 18,
-            logoURI: '',
-            isVerified: false,
-            source: 'coingecko',
-            ts: now
-        };
-        tickerResolveCache[symbol] = { ...out };
+        // xStocks: prefer the tokenized US equity on BNB Chain over DexScreener
+        // (which would surface unrelated memecoins) and over the "notCrypto"
+        // suppression below. We try the proxy whenever the symbol is in our
+        // static seed OR dynamic catalog, AND additionally as an auto-discover
+        // pass when CMC explicitly said not_crypto for a stock-shaped ticker
+        // (1-5 uppercase chars). The backend caches negatives for 6h so this
+        // remains cheap for non-stocks.
+        const shouldProbeXStocks = isCatalogXStock || (cmcOutcome.status === 'not_found' && isStockShaped);
+        if (shouldProbeXStocks) {
+            const xResult = await clipxResolveTickerViaXStocksProxy(symbol);
+            if (xResult && xResult.address) {
+                tickerResolveCache[symbol] = { ...xResult };
+                await chrome.storage.local.set({ tickerResolveCache });
+                sendResponse({ success: true, ...xResult });
+                return;
+            }
+        }
+
+        // SUPPRESS DexScreener fallback for known xStock tickers. Otherwise the
+        // search would surface unrelated memecoins (e.g., a 2-year-old "NVDA"
+        // memecoin on Solana) and render them as the $NVDA pill — which is
+        // misleading. If the xStocks backend is unreachable we'd rather show
+        // nothing (or a "lookup pending" state) than wrong data.
+        if (isCatalogXStock) {
+            const pendingTtl = 5 * 60 * 1000; // 5 min — short so we retry once backend is up
+            tickerResolveCache[symbol] = {
+                ts: now,
+                miss: true,
+                isXStock: true,
+                xStockPending: true,
+                expiresIn: pendingTtl
+            };
+            await chrome.storage.local.set({ tickerResolveCache });
+            sendResponse({
+                success: false,
+                isXStock: true,
+                xStockPending: true,
+                error: 'xStock backend pending (no fallback to DexScreener for known stock tickers)'
+            });
+            return;
+        }
+
+        // CMC-first strict: if CMC was reachable and explicitly returned no match, treat
+        // the symbol as non-crypto (e.g., $GOOGL when not in xStocks catalog) and skip
+        // pill creation entirely. The notCrypto flag tells the content script to add this
+        // ticker to its rejected set.
+        if (cmcOutcome.status === 'not_found') {
+            tickerResolveCache[symbol] = { ts: now, miss: true, notCrypto: true };
+            await chrome.storage.local.set({ tickerResolveCache });
+            sendResponse({ success: false, notCrypto: true, error: 'Not a crypto symbol per CoinMarketCap' });
+            return;
+        }
+
+        // CMC backend unreachable → fall back to DexScreener / CoinGecko / Solana
+        // so the feature still works during outages or before backend deploys CMC route.
+        let bestResult = null;
+        try {
+            const dexRes = await fetchWithTimeout(
+                `https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(symbol)}`,
+                { headers: { Accept: 'application/json' } }
+            );
+            if (dexRes.ok) {
+                const dexData = await dexRes.json();
+                if (dexData.pairs && dexData.pairs.length > 0) {
+                    // Only consider BSC and Solana pairs with exact symbol match
+                    const relevant = dexData.pairs.filter(p =>
+                        (p.chainId === 'bsc' || p.chainId === 'solana') &&
+                        p.baseToken && p.baseToken.symbol &&
+                        p.baseToken.symbol.toUpperCase() === symbol
+                    );
+                    if (relevant.length > 0) {
+                        // Sort by liquidity USD descending — highest liquidity = real token
+                        relevant.sort((a, b) => {
+                            const liqA = (a.liquidity && a.liquidity.usd) ? parseFloat(a.liquidity.usd) : 0;
+                            const liqB = (b.liquidity && b.liquidity.usd) ? parseFloat(b.liquidity.usd) : 0;
+                            return liqB - liqA;
+                        });
+                        const solRelevant = relevant.filter(p => p.chainId === 'solana');
+                        const topPair = preferSolana && solRelevant.length ? solRelevant[0] : relevant[0];
+                        const pairChain = topPair.chainId === 'solana' ? 'sol' : 'bnb';
+                        bestResult = {
+                            address: topPair.baseToken.address,
+                            chain: pairChain,
+                            symbol,
+                            name: topPair.baseToken.name || symbol,
+                            decimals: pairChain === 'sol' ? 9 : 18,
+                            logoURI: (topPair.info && topPair.info.imageUrl) || '',
+                            isVerified: false,
+                            source: 'dexscreener',
+                            priceUsd: topPair.priceUsd || null,
+                            priceChange: topPair.priceChange ? topPair.priceChange.h24 : 0,
+                            marketCapUsd: topPair.fdv || topPair.marketCap || null,
+                            pairCreatedAt: topPair.pairCreatedAt || null,
+                            liquidityUsd: topPair.liquidity ? topPair.liquidity.usd : null,
+                            iconUrl: (topPair.info && topPair.info.imageUrl) || '',
+                            ts: now
+                        };
+                    }
+                }
+            }
+        } catch (dexErr) {
+            console.warn('[ClipX Background] DexScreener search failed:', dexErr);
+        }
+
+        // If DexScreener found a result, use it
+        if (bestResult) {
+            tickerResolveCache[symbol] = { ...bestResult };
+            await chrome.storage.local.set({ tickerResolveCache });
+            sendResponse({ success: true, ...bestResult });
+            return;
+        }
+
+        // Fallback: CoinGecko BSC index
+        const index = await clipxLoadCoinGeckoBscIndex();
+        const candidates = index[symbol] || [];
+
+        if (candidates.length > 0) {
+            const best = await clipxPickBestCoinGeckoCandidate(candidates);
+            const out = {
+                address: best.address,
+                chain: 'bnb',
+                symbol,
+                name: best.name || symbol,
+                decimals: 18,
+                logoURI: '',
+                isVerified: false,
+                source: 'coingecko',
+                ts: now
+            };
+            tickerResolveCache[symbol] = { ...out };
+            await chrome.storage.local.set({ tickerResolveCache });
+            sendResponse({ success: true, ...out });
+            return;
+        }
+
+        // Last resort: Solana-only lookup via server proxy
+        try {
+            const solRes = await fetchWithTimeout(`${API_BASE}/api/sol/ticker/${encodeURIComponent(symbol)}`, { headers: { Accept: 'application/json' } });
+            if (solRes.ok) {
+                const solData = await solRes.json();
+                if (solData && solData.address) {
+                    const solOut = {
+                        address: solData.address,
+                        chain: 'sol',
+                        symbol,
+                        name: solData.name || symbol,
+                        decimals: solData.decimals != null ? solData.decimals : 9,
+                        logoURI: solData.logoURI || '',
+                        isVerified: !!solData.isVerified,
+                        source: 'solana',
+                        ts: now
+                    };
+                    tickerResolveCache[symbol] = { ...solOut };
+                    await chrome.storage.local.set({ tickerResolveCache });
+                    sendResponse({ success: true, ...solOut });
+                    return;
+                }
+            }
+        } catch (solErr) {
+            console.warn('[ClipX Background] SOL ticker lookup failed:', solErr);
+        }
+
+        tickerResolveCache[symbol] = { ts: now, miss: true };
         await chrome.storage.local.set({ tickerResolveCache });
-
-        sendResponse({
-            success: true,
-            address: out.address,
-            symbol: out.symbol,
-            name: out.name,
-            decimals: out.decimals,
-            logoURI: out.logoURI,
-            isVerified: out.isVerified,
-            source: out.source
-        });
+        sendResponse({ success: false, error: 'No token found on BSC or Solana' });
     } catch (e) {
         console.warn('[ClipX Background] resolveTicker (CoinGecko):', e);
         sendResponse({ success: false, error: e.message || String(e) });
@@ -2406,16 +3833,29 @@ async function handleResolveTickerDexScreener(request, sendResponse) {
 }
 
 async function handleNativeSwap(request, sendResponse) {
-    // Auto-unlock from session if possible
-    await ensureWalletUnlocked();
-
-    if (!unlockedWallet) {
-        sendResponse({ success: false, error: 'Wallet is locked. Please unlock in popup.' });
-        return;
-    }
-
     try {
         const { tokenAddress, amount, type, slippage } = request;
+        const swapType = type === 'sell' ? 'sell' : 'buy';
+        const walletState = await getNativeWalletState();
+
+        if (!tokenAddress || !ethers.isAddress(tokenAddress)) {
+            sendResponse({ success: false, error: 'Invalid BSC token address.' });
+            return;
+        }
+
+        parsePositiveDecimal(amount, swapType === 'buy' ? 'BNB amount' : (request.isPercentage ? 'sell percentage' : 'token amount'));
+
+        // Auto-unlock from session if possible
+        await ensureWalletUnlocked();
+        if (!unlockedWallet) {
+            sendResponse({
+                success: false,
+                error: walletState.hasWallet
+                    ? 'Unlock your BSC wallet in the extension popup.'
+                    : 'Create or import a BSC wallet in the extension popup.'
+            });
+            return;
+        }
 
         // Step 1: Check if this is a four.meme token
         console.log('[ClipX Native] Checking if token is four.meme...');
@@ -2452,15 +3892,23 @@ async function handleNativeSwap(request, sendResponse) {
                         console.log('[ClipX Native] Four.meme unbonded token detected, routing to TokenManager2');
 
                         // Route to four.meme TokenManager2
-                        if (type === 'buy') {
-                            const result = await buyFourMemeToken(tokenAddress, parseFloat(amount), slippage || 0.02);
+                        const fourMemeSlippage = slippageToBps(slippage, 200) / 10000;
+                        if (swapType === 'buy') {
+                            const result = await buyFourMemeToken(tokenAddress, parseFloat(amount), fourMemeSlippage);
                             sendResponse({
                                 success: true,
                                 txHash: result.transactionHash,
                                 message: 'Swap submitted via Four.Meme'
                             });
                         } else {
-                            const result = await sellFourMemeToken(tokenAddress, parseFloat(amount), slippage || 0.02);
+                            if (request.isPercentage) {
+                                sendResponse({
+                                    success: false,
+                                    error: 'Four.meme percentage sells need a token balance. Refresh balances and try again.'
+                                });
+                                return;
+                            }
+                            const result = await sellFourMemeToken(tokenAddress, parseFloat(amount), fourMemeSlippage);
                             sendResponse({
                                 success: true,
                                 txHash: result.transactionHash,
@@ -2494,16 +3942,29 @@ async function handleNativeSwap(request, sendResponse) {
         ], wallet);
 
         const timestamp = Math.floor(Date.now() / 1000) + 1200;
+        const slippageBps = slippageToBps(slippage, 100);
         let tx;
 
-        if (type === 'buy') {
+        if (swapType === 'buy') {
             const amountIn = ethers.parseEther(amount.toString());
+            const feeData = await provider.getFeeData();
+            const gasPrice = request.gasPrice
+                ? ethers.parseUnits(request.gasPrice.toString(), 'gwei')
+                : (feeData.gasPrice || ethers.parseUnits('3', 'gwei'));
+            const gasLimit = 300000n;
+            const balance = await provider.getBalance(wallet.address);
+            const estimatedCost = amountIn + (gasPrice * gasLimit);
+            if (balance < estimatedCost) {
+                sendResponse({ success: false, error: 'Insufficient BNB for buy amount and gas.' });
+                return;
+            }
+
             const path = [wbnbAddress, tokenAddress];
             const amounts = await router.getAmountsOut(amountIn, path);
-            const amountOutMin = amounts[1] * BigInt(10000 - (slippage * 100 || 50)) / BigInt(10000);
+            const amountOutMin = amounts[1] * BigInt(10000 - slippageBps) / BigInt(10000);
 
-            const overrides = { value: amountIn, gasLimit: 300000 };
-            if (request.gasPrice) overrides.gasPrice = ethers.parseUnits(request.gasPrice.toString(), 'gwei');
+            const overrides = { value: amountIn, gasLimit };
+            if (request.gasPrice) overrides.gasPrice = gasPrice;
 
             tx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(amountOutMin, path, wallet.address, timestamp, overrides);
         } else {
@@ -2515,18 +3976,46 @@ async function handleNativeSwap(request, sendResponse) {
             ], wallet);
 
             const decimals = await tokenContract.decimals();
-            let amountIn = ethers.parseUnits(amount.toString(), decimals);
-
-            // IMPORTANT: Check actual on-chain balance to avoid precision issues
             const actualBalance = await tokenContract.balanceOf(wallet.address);
-            console.log('[ClipX Native] Sell amount requested:', amountIn.toString());
             console.log('[ClipX Native] Actual on-chain balance:', actualBalance.toString());
+            if (actualBalance <= 0n) {
+                sendResponse({ success: false, error: 'No token balance available to sell.' });
+                return;
+            }
+
+            let amountIn;
+            if (request.isPercentage) {
+                const pct = parsePositiveDecimal(amount, 'sell percentage');
+                if (pct > 100) {
+                    sendResponse({ success: false, error: 'Sell percentage cannot be greater than 100%.' });
+                    return;
+                }
+                amountIn = actualBalance * BigInt(Math.round(pct * 100)) / 10000n;
+            } else {
+                amountIn = ethers.parseUnits(amount.toString(), decimals);
+            }
+            console.log('[ClipX Native] Sell amount requested:', amountIn.toString());
 
             // If amountIn exceeds or nearly equals actual balance, use actual balance to sell all
             // This fixes the "100% sell fails" issue due to floating-point precision
             if (amountIn > actualBalance || amountIn >= actualBalance * BigInt(999) / BigInt(1000)) {
                 console.log('[ClipX Native] Using actual balance for 100% sell');
                 amountIn = actualBalance;
+            }
+            if (amountIn <= 0n) {
+                sendResponse({ success: false, error: 'Sell amount is too small.' });
+                return;
+            }
+
+            const feeData = await provider.getFeeData();
+            const gasPrice = request.gasPrice
+                ? ethers.parseUnits(request.gasPrice.toString(), 'gwei')
+                : (feeData.gasPrice || ethers.parseUnits('3', 'gwei'));
+            const gasLimit = 500000n;
+            const balance = await provider.getBalance(wallet.address);
+            if (balance < gasPrice * gasLimit) {
+                sendResponse({ success: false, error: 'Insufficient BNB for gas.' });
+                return;
             }
 
             const allowance = await tokenContract.allowance(wallet.address, routerAddress);
@@ -2538,35 +4027,29 @@ async function handleNativeSwap(request, sendResponse) {
             const path = [tokenAddress, wbnbAddress];
             console.log('[ClipX Background] Sell: In', amountIn.toString());
             const amounts = await router.getAmountsOut(amountIn, path);
-            const amountOutMin = amounts[1] * BigInt(10000 - (slippage * 100 || 50)) / BigInt(10000);
+            const amountOutMin = amounts[1] * BigInt(10000 - slippageBps) / BigInt(10000);
             console.log('[ClipX Background] Sell: Min Out', amountOutMin.toString());
 
-            tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, wallet.address, timestamp, { gasLimit: 500000 });
+            const overrides = { gasLimit };
+            if (request.gasPrice) overrides.gasPrice = gasPrice;
+            tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(amountIn, amountOutMin, path, wallet.address, timestamp, overrides);
         }
         console.log('[ClipX Native] Swap TX sent:', tx.hash);
         sendResponse({ success: true, txHash: tx.hash, message: 'Swap submitted' });
     } catch (e) {
         console.error('[ClipX Native] Swap failed:', e);
-        sendResponse({ success: false, error: e.reason || e.message });
+        sendResponse({ success: false, error: getErrorMessage(e, 'BSC swap failed') });
     }
 }
 
 async function handleSwap(request, sendResponse) {
     try {
-        console.log('[ClipX Background] Starting swap handler');
-        const stored = await chrome.storage.local.get(['authToken']);
+        console.log('[ClipX Background] Starting native-first BSC swap handler');
+        const stored = await chrome.storage.local.get(['authToken', 'useDashboardWalletSwap']);
         const authToken = stored.authToken;
 
-        console.log('[ClipX Background] Auth token:', authToken ? 'Found' : 'Not found');
-
-        if (!authToken) {
-            console.error('[ClipX Background] No auth token');
-            sendResponse({ success: false, error: 'Please log in to ClipX first' });
-            return;
-        }
-
-        // Handle Native Wallet Swap
-        if (authToken === 'native-wallet') {
+        const useHostedSwap = request.useHostedSwap === true || stored.useDashboardWalletSwap === true;
+        if (!useHostedSwap || authToken === 'native-wallet' || !authToken) {
             await handleNativeSwap(request, sendResponse);
             return;
         }
@@ -3069,134 +4552,6 @@ const ERC20_ABI = [
     "function balanceOf(address account) external view returns (uint256)"
 ];
 
-async function handleNativeSwap(request, sendResponse) {
-    try {
-        console.log('[ClipX Background] Starting native swap...');
-
-        // Auto-unlock if needed
-        await ensureWalletUnlocked();
-
-        if (!unlockedWallet) {
-            sendResponse({ success: false, error: 'Wallet is locked. Please unlock it in the extension popup.' });
-            return;
-        }
-
-        const provider = new ethers.JsonRpcProvider('https://bsc.rpc.blxrbdn.com');
-        const wallet = unlockedWallet.connect(provider);
-        const router = new ethers.Contract(PANCAKESWAP_ROUTER, ROUTER_ABI, wallet);
-
-        const tokenAddress = request.tokenAddress;
-        const amount = request.amount; // String
-        const type = request.type || 'buy';
-        // Default to 10% slippage if not specified, to handle tax tokens safely
-        const slippage = parseFloat(request.slippage || 10);
-        const deadline = Math.floor(Date.now() / 1000) + 60 * 20; // 20 minutes
-
-        console.log(`[ClipX Background] Native Swap: ${type} ${amount} for ${tokenAddress}, Slippage: ${slippage}%`);
-
-        let tx;
-
-        if (type === 'buy') {
-            // BNB -> Token
-            const amountIn = ethers.parseEther(amount.toString());
-            const path = [WBNB_ADDRESS, tokenAddress];
-
-            // Calculate min amount out
-            const amountsOut = await router.getAmountsOut(amountIn, path);
-            const amountOutExpected = amountsOut[1];
-            // Calculate min out based on slippage
-            const amountOutMin = amountOutExpected - (amountOutExpected * BigInt(Math.floor(slippage * 100)) / 10000n);
-
-            console.log(`[ClipX Background] Buy: In ${amountIn}, Min Out ${amountOutMin}`);
-
-            tx = await router.swapExactETHForTokensSupportingFeeOnTransferTokens(
-                amountOutMin,
-                path,
-                wallet.address,
-                deadline,
-                {
-                    value: amountIn,
-                    gasLimit: 3000000 // High gas limit for complex tax tokens
-                }
-            );
-
-        } else {
-            // Token -> BNB
-            const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
-
-            // We need to know decimals to parse amount correctly. 
-            // For MVP, assuming 18 decimals or fetching? 
-            // Let's try to fetch decimals if possible, or assume 18.
-            // A safer way is to fetch decimals.
-            const decimalsABI = ["function decimals() view returns (uint8)"];
-            const tokenDecimalsContract = new ethers.Contract(tokenAddress, decimalsABI, provider);
-            let decimals = 18;
-            try {
-                decimals = await tokenDecimalsContract.decimals();
-            } catch (e) {
-                console.warn('Failed to fetch decimals, assuming 18');
-            }
-
-            let amountIn = ethers.parseUnits(amount.toString(), decimals);
-            const path = [tokenAddress, WBNB_ADDRESS];
-
-            // IMPORTANT: Check actual on-chain balance to avoid precision issues
-            const balanceABI = ["function balanceOf(address) view returns (uint256)"];
-            const balanceContract = new ethers.Contract(tokenAddress, balanceABI, provider);
-            const actualBalance = await balanceContract.balanceOf(wallet.address);
-            console.log('[ClipX Background] Sell amount requested:', amountIn.toString());
-            console.log('[ClipX Background] Actual on-chain balance:', actualBalance.toString());
-
-            // If amountIn exceeds or nearly equals actual balance (99.9%), use actual balance
-            // This fixes the "100% sell fails" issue due to floating-point precision
-            if (amountIn > actualBalance || amountIn >= (actualBalance * 999n / 1000n)) {
-                console.log('[ClipX Background] Using actual balance for 100% sell');
-                amountIn = actualBalance;
-            }
-
-            // Check Allowance
-            const allowance = await tokenContract.allowance(wallet.address, PANCAKESWAP_ROUTER);
-            if (allowance < amountIn) {
-                console.log('[ClipX Background] Approving token...');
-                const approveTx = await tokenContract.approve(PANCAKESWAP_ROUTER, ethers.MaxUint256);
-                await approveTx.wait();
-                console.log('[ClipX Background] Approved.');
-            }
-
-            // Calculate min amount out
-            const amountsOut = await router.getAmountsOut(amountIn, path);
-            const amountOutExpected = amountsOut[1];
-            const amountOutMin = amountOutExpected - (amountOutExpected * BigInt(Math.floor(slippage * 100)) / 10000n);
-
-            console.log(`[ClipX Background] Sell: In ${amountIn}, Min Out ${amountOutMin}`);
-
-            tx = await router.swapExactTokensForETHSupportingFeeOnTransferTokens(
-                amountIn,
-                amountOutMin,
-                path,
-                wallet.address,
-                deadline,
-                { gasLimit: 3000000 } // High gas limit
-            );
-        }
-
-        console.log('[ClipX Background] Swap TX sent:', tx.hash);
-        await tx.wait();
-        console.log('[ClipX Background] Swap confirmed');
-
-        sendResponse({ success: true, txHash: tx.hash, message: 'Swap successful' });
-
-    } catch (error) {
-        console.error('[ClipX Background] Native swap failed:', error);
-        // Handle specific errors like gas, slippage
-        let errorMsg = error.message;
-        if (errorMsg.includes('INSUFFICIENT_OUTPUT_AMOUNT')) errorMsg = 'Slippage too low';
-        if (errorMsg.includes('insufficient funds')) errorMsg = 'Insufficient BNB for gas';
-
-        sendResponse({ success: false, error: errorMsg });
-    }
-}
-
 // Handle Get Wallet Assets via BSCScan API
 async function handleGetWalletAssets(request, sendResponse) {
     try {
@@ -3361,7 +4716,7 @@ async function tryLunarCrush(symbolOrAddress) {
         // If it looks like an address, try to get symbol from our token map
         if (symbolOrAddress.startsWith('0x')) {
             // Try to find symbol in our priority tokens
-            const priorityToken = Object.entries(PRIORITY_TOKENS).find(
+            const priorityToken = Object.entries(clipxEffectivePriorityTokens).find(
                 ([, token]) => token.address.toLowerCase() === symbolOrAddress.toLowerCase()
             );
             if (priorityToken) {

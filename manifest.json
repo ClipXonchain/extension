@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipX - Track & Trade on X",
-  "version": "1.22.0",
+  "version": "1.50.0",
   "description": "ClipX - Your Co-Pilot & Profile Intelligence for X",
   "icons": {
     "16": "public/icon.png",
@@ -11,17 +11,16 @@
   "permissions": [
     "storage",
     "declarativeNetRequest",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "host_permissions": [
-    "https://x.com/*",
     "https://clipx.app/*",
     "https://www.clipx.app/*",
     "https://*.gmgn.ai/*",
     "https://api.gopluslabs.io/*",
     "https://api.dexscreener.com/*",
     "https://api.coingecko.com/*",
-    "https://*.bubblemaps.io/*",
     "https://syndication.twitter.com/*"
   ],
   "declarative_net_request": {
@@ -78,7 +77,7 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' https://unavatar.io https://abs.twimg.com https://pbs.twimg.com; frame-src https://iframe.bubblemaps.io https://app.bubblemaps.io https://*.bubblemaps.io https://faster100x.com https://app.insightx.network https://*.insightx.network https://gmgn.ai https://*.gmgn.ai https://www.gmgn.cc https://*.gmgn.cc https://dexscreener.com https://*.dexscreener.com;"
+    "extension_pages": "script-src 'self'; object-src 'self'; img-src 'self' data: https:; frame-src https://iframe.bubblemaps.io https://app.bubblemaps.io https://*.bubblemaps.io https://faster100x.com https://app.insightx.network https://*.insightx.network https://gmgn.ai https://*.gmgn.ai https://www.gmgn.cc https://*.gmgn.cc https://dexscreener.com https://*.dexscreener.com;"
   },
   "web_accessible_resources": [
     {

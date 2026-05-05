@@ -762,6 +762,998 @@
             border-color: var(--primary);
             transform: translateX(2px);
         }
+
+        .native-wallet-panel,
+        .wallet-dashboard-card {
+            position: relative;
+            overflow: hidden;
+            background:
+                radial-gradient(circle at 12% 0%, rgba(168, 85, 247, 0.25), transparent 34%),
+                radial-gradient(circle at 92% 18%, rgba(20, 241, 149, 0.14), transparent 30%),
+                linear-gradient(145deg, rgba(18, 18, 22, 0.98), rgba(7, 7, 10, 0.96));
+            border: 1px solid rgba(139, 92, 246, 0.36);
+            box-shadow: 0 18px 50px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+        }
+
+        .native-wallet-panel::before,
+        .wallet-dashboard-card::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 28%, transparent 72%, rgba(255, 255, 255, 0.03));
+            opacity: 0.75;
+        }
+
+        .wallet-surface {
+            position: relative;
+            z-index: 1;
+        }
+
+        .wallet-hero {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .wallet-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 8px;
+            border-radius: var(--radius-full);
+            background: rgba(16, 185, 129, 0.1);
+            color: #6ee7b7;
+            border: 1px solid rgba(16, 185, 129, 0.18);
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .wallet-title {
+            font-size: 18px;
+            line-height: 1.05;
+            font-weight: 850;
+            letter-spacing: -0.04em;
+            color: var(--text-main);
+        }
+
+        .wallet-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            line-height: 1.45;
+            margin-top: 6px;
+        }
+
+        .wallet-refresh-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 11px;
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            background: rgba(255, 255, 255, 0.06);
+            color: #d4d4d8;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+
+        .wallet-refresh-btn:hover {
+            background: rgba(255, 255, 255, 0.11);
+            color: #fff;
+        }
+
+        .wallet-chain-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+        }
+
+        .wallet-chain-card {
+            position: relative;
+            min-width: 0;
+            padding: 11px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.055);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+        }
+
+        .wallet-chain-card[data-chain="bsc"] {
+            background: linear-gradient(145deg, rgba(240, 185, 11, 0.12), rgba(255, 255, 255, 0.04));
+        }
+
+        .wallet-chain-card[data-chain="sol"] {
+            background: linear-gradient(145deg, rgba(153, 69, 255, 0.14), rgba(20, 241, 149, 0.08));
+        }
+
+        .wallet-chain-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 6px;
+            font-size: 9px;
+            color: var(--text-muted);
+            margin-bottom: 7px;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .wallet-chain-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #52525b;
+            box-shadow: 0 0 0 3px rgba(82, 82, 91, 0.16);
+        }
+
+        .wallet-chain-card.is-ready .wallet-chain-dot {
+            background: #22c55e;
+            box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16);
+        }
+
+        .wallet-address-line {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            font-weight: 750;
+            color: var(--text-main);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .wallet-action-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .wallet-mini-btn {
+            border-radius: 12px !important;
+            padding: 10px !important;
+            font-size: 11px !important;
+            border: 1px solid rgba(255, 255, 255, 0.08) !important;
+        }
+
+        .wallet-primary-cta {
+            background: linear-gradient(135deg, #a855f7 0%, #7c3aed 52%, #14f195 140%) !important;
+            box-shadow: 0 10px 28px rgba(139, 92, 246, 0.26);
+        }
+
+        .wallet-note {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            padding: 10px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            font-size: 10px;
+            color: var(--text-muted);
+            line-height: 1.45;
+            margin-top: 10px;
+        }
+
+        .wallet-form-panel {
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 16px;
+            background: rgba(0, 0, 0, 0.24);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .wallet-management-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }
+
+        .wallet-feature-card {
+            background: #0c0c0f;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 14px;
+        }
+
+        .wallet-feature-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        .wallet-feature-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            font-weight: 800;
+            color: var(--text-main);
+        }
+
+        .wallet-feature-subtitle {
+            font-size: 10px;
+            color: var(--text-muted);
+            line-height: 1.4;
+            margin-top: 3px;
+        }
+
+        .wallet-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 4px 8px;
+            border-radius: var(--radius-full);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #d4d4d8;
+            font-size: 10px;
+            font-weight: 750;
+            white-space: nowrap;
+        }
+
+        .wallet-address-box {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            padding: 8px 10px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .wallet-address-box .form-control {
+            padding: 0;
+            border: 0;
+            background: transparent;
+            border-radius: 0;
+        }
+
+        .wallet-assets-shell {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            padding-right: 2px;
+        }
+
+        .wallet-asset-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.045);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+        }
+
+        .wallet-asset-left {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-width: 0;
+        }
+
+        .wallet-asset-icon {
+            position: relative;
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 900;
+            flex-shrink: 0;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .wallet-asset-icon.bnb {
+            background: rgba(240, 185, 11, 0.16);
+            color: #facc15;
+        }
+
+        .wallet-asset-icon.sol {
+            background: linear-gradient(145deg, rgba(153, 69, 255, 0.28), rgba(20, 241, 149, 0.18));
+            color: #fff;
+        }
+
+        .wallet-asset-icon.token {
+            background: rgba(139, 92, 246, 0.18);
+            color: #c4b5fd;
+        }
+
+        .wallet-asset-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        .wallet-asset-fallback {
+            font-size: 13px;
+            line-height: 1;
+            font-weight: 900;
+        }
+
+        .wallet-asset-name {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 0;
+            font-size: 12px;
+            color: var(--text-main);
+            font-weight: 800;
+        }
+
+        .wallet-asset-symbol {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .wallet-chain-badge {
+            font-size: 8px;
+            padding: 2px 5px;
+            border-radius: 6px;
+            font-weight: 900;
+            letter-spacing: 0.04em;
+        }
+
+        .wallet-chain-badge.bnb {
+            background: rgba(240, 185, 11, 0.18);
+            color: #facc15;
+        }
+
+        .wallet-chain-badge.sol {
+            background: rgba(153, 69, 255, 0.2);
+            color: #c4b5fd;
+        }
+
+        .wallet-asset-meta {
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .wallet-asset-price {
+            margin-top: 2px;
+            font-size: 10px;
+            color: #d8c7ff;
+            letter-spacing: -0.01em;
+        }
+
+        .wallet-asset-right {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .wallet-asset-balance {
+            font-size: 12px;
+            font-weight: 850;
+            color: #fff;
+        }
+
+        .wallet-asset-value {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+
+        .wallet-send-panel {
+            display: grid;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 12px;
+            border-radius: 16px;
+        }
+
+        .wallet-empty-state {
+            text-align: center;
+            padding: 22px 12px;
+            color: var(--text-muted);
+            font-size: 12px;
+            line-height: 1.45;
+        }
+
+        .wallet-danger-zone {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: 14px;
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.24);
+        }
+
+        .wallet-secret-box {
+            display: none;
+            margin-top: 8px;
+            padding: 9px;
+            border-radius: 10px;
+            background: #050505;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #fca5a5;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 10px;
+            word-break: break-all;
+            user-select: all;
+        }
+
+        /* ── Professional wallet header ─────────────────────────── */
+        .pro-wallet {
+            position: relative;
+            overflow: hidden;
+            border-radius: 22px;
+            padding: 18px 16px 16px;
+            background:
+                radial-gradient(120% 90% at 0% 0%, rgba(168, 85, 247, 0.32), transparent 55%),
+                radial-gradient(120% 80% at 100% 0%, rgba(20, 241, 149, 0.18), transparent 50%),
+                linear-gradient(160deg, #14101e 0%, #08070d 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+        }
+
+        .pro-wallet::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            background: radial-gradient(120% 80% at 50% 110%, rgba(255, 255, 255, 0.05), transparent 60%);
+        }
+
+        .pro-wallet > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .pro-wallet-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .chain-switch {
+            display: inline-flex;
+            padding: 3px;
+            border-radius: var(--radius-full);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .chain-switch button {
+            border: 0;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 11px;
+            font-weight: 700;
+            padding: 6px 12px;
+            border-radius: var(--radius-full);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.18s ease;
+        }
+
+        .chain-switch button[aria-pressed="true"] {
+            background: linear-gradient(135deg, #a855f7 0%, #6d28d9 100%);
+            color: #fff;
+            box-shadow: 0 6px 18px rgba(139, 92, 246, 0.34);
+        }
+
+        .chain-switch .chain-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .chain-switch .chain-dot.bnb { background: #facc15; }
+        .chain-switch .chain-dot.sol { background: #c084fc; }
+
+        .wallet-more-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: rgba(255, 255, 255, 0.04);
+            color: #d4d4d8;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.18s;
+        }
+
+        .wallet-more-btn:hover {
+            background: rgba(255, 255, 255, 0.09);
+            color: #fff;
+        }
+
+        .pro-balance-row {
+            display: flex;
+            align-items: flex-end;
+            gap: 10px;
+            margin-bottom: 4px;
+        }
+
+        .pro-balance-amount {
+            font-size: 30px;
+            font-weight: 850;
+            letter-spacing: -0.04em;
+            color: #fff;
+            line-height: 1;
+        }
+
+        .pro-balance-currency {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--text-muted);
+            padding-bottom: 4px;
+        }
+
+        .pro-balance-native {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .pro-balance-change {
+            margin-left: auto;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 4px 9px;
+            border-radius: var(--radius-full);
+            background: rgba(34, 197, 94, 0.12);
+            color: #4ade80;
+            border: 1px solid rgba(34, 197, 94, 0.22);
+        }
+
+        .pro-balance-change.negative {
+            background: rgba(239, 68, 68, 0.12);
+            color: #f87171;
+            border-color: rgba(239, 68, 68, 0.22);
+        }
+
+        .pro-address-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px 6px 10px;
+            border-radius: var(--radius-full);
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #f4f4f5;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            transition: all 0.15s;
+        }
+
+        .pro-address-chip:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .pro-address-chip .pro-address-avatar {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #a855f7, #14f195);
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+        }
+
+        .pro-actions {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .pro-actions.pro-actions-3 {
+            grid-template-columns: repeat(3, 1fr);
+        }
+
+        .pro-action {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            padding: 12px 6px 10px;
+            border-radius: 16px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: #fafafa;
+            font-size: 11px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.15s ease, background 0.18s ease, border-color 0.18s ease;
+        }
+
+        .pro-action:hover {
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.18);
+            transform: translateY(-1px);
+        }
+
+        .pro-action:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .pro-action .pro-action-icon {
+            width: 32px;
+            height: 32px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.5), rgba(99, 102, 241, 0.45));
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+            color: #fff;
+        }
+
+        .pro-action[data-variant="receive"] .pro-action-icon {
+            background: linear-gradient(135deg, rgba(34, 197, 94, 0.55), rgba(20, 184, 166, 0.45));
+        }
+
+        .pro-action[data-variant="swap"] .pro-action-icon {
+            background: linear-gradient(135deg, rgba(244, 114, 182, 0.55), rgba(168, 85, 247, 0.45));
+        }
+
+        .pro-action[data-variant="more"] .pro-action-icon {
+            background: linear-gradient(135deg, rgba(82, 82, 91, 0.55), rgba(63, 63, 70, 0.5));
+        }
+
+        .pro-action svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* Tabs inside wallet card */
+        .pro-segment {
+            display: flex;
+            margin: 14px 0 10px;
+            padding: 3px;
+            border-radius: var(--radius-full);
+            background: var(--bg-input);
+            border: 1px solid var(--border);
+        }
+
+        .pro-segment button {
+            flex: 1;
+            border: 0;
+            background: transparent;
+            color: var(--text-muted);
+            font-size: 12px;
+            font-weight: 700;
+            padding: 8px 10px;
+            border-radius: var(--radius-full);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .pro-segment button[aria-selected="true"] {
+            background: var(--bg-card);
+            color: var(--text-main);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+        }
+
+        /* Empty wallet (create state) */
+        .pro-empty {
+            position: relative;
+            padding: 22px 16px;
+            border-radius: 22px;
+            background:
+                radial-gradient(120% 90% at 0% 0%, rgba(168, 85, 247, 0.18), transparent 55%),
+                linear-gradient(160deg, #14101e 0%, #08070d 100%);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .pro-empty .pro-empty-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 16px;
+            margin: 0 auto 10px;
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(99, 102, 241, 0.35));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: #fff;
+        }
+
+        .pro-empty h3 {
+            margin: 0 0 6px;
+            font-size: 16px;
+            font-weight: 800;
+            color: #fff;
+            letter-spacing: -0.02em;
+        }
+
+        .pro-empty p {
+            font-size: 12px;
+            line-height: 1.5;
+            margin-bottom: 14px;
+        }
+
+        .pro-empty-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        /* Sheet / Modal */
+        .pro-sheet-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(2, 2, 6, 0.7);
+            backdrop-filter: blur(6px);
+            -webkit-backdrop-filter: blur(6px);
+            display: none;
+            align-items: flex-end;
+            justify-content: center;
+            z-index: 1200;
+            padding: 12px;
+            animation: pro-fade .14s ease;
+        }
+
+        .pro-sheet-backdrop.is-open {
+            display: flex;
+        }
+
+        @keyframes pro-fade {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        .pro-sheet {
+            position: relative;
+            width: 100%;
+            max-width: 360px;
+            max-height: 92vh;
+            overflow-y: auto;
+            background: linear-gradient(180deg, #14111c 0%, #0a0810 100%);
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-radius: 24px;
+            padding: 16px;
+            color: var(--text-main);
+            animation: pro-slide .22s cubic-bezier(.2,.7,.3,1);
+            box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+        }
+
+        @keyframes pro-slide {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+
+        .pro-sheet-grabber {
+            width: 36px;
+            height: 4px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.18);
+            margin: -4px auto 12px;
+        }
+
+        .pro-sheet-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+
+        .pro-sheet-title {
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+            color: #fff;
+        }
+
+        .pro-sheet-close {
+            width: 30px;
+            height: 30px;
+            border-radius: 10px;
+            border: 0;
+            background: rgba(255, 255, 255, 0.06);
+            color: #d4d4d8;
+            cursor: pointer;
+            font-size: 16px;
+            line-height: 1;
+        }
+
+        .pro-sheet-close:hover {
+            background: rgba(255, 255, 255, 0.12);
+            color: #fff;
+        }
+
+        /* Receive sheet */
+        .pro-receive-card {
+            text-align: center;
+            padding: 16px;
+            border-radius: 18px;
+            background: linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .pro-receive-chain-row {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .pro-qr-frame {
+            width: 200px;
+            height: 200px;
+            margin: 0 auto;
+            padding: 12px;
+            border-radius: 18px;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+        }
+
+        .pro-qr-frame svg {
+            width: 100%;
+            height: 100%;
+        }
+
+        .pro-receive-address {
+            margin-top: 14px;
+            padding: 10px 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 11.5px;
+            color: #f4f4f5;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
+        .pro-receive-actions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .pro-warning {
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: rgba(251, 191, 36, 0.08);
+            border: 1px solid rgba(251, 191, 36, 0.2);
+            color: #fcd34d;
+            font-size: 11px;
+            line-height: 1.45;
+            margin-top: 12px;
+        }
+
+        /* More menu list */
+        .pro-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .pro-menu-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            border-radius: 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            color: #fafafa;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: left;
+            width: 100%;
+        }
+
+        .pro-menu-row:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.14);
+        }
+
+        .pro-menu-row .pro-menu-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 11px;
+            background: rgba(168, 85, 247, 0.2);
+            color: #c4b5fd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+
+        .pro-menu-row[data-tone="danger"] .pro-menu-icon {
+            background: rgba(239, 68, 68, 0.18);
+            color: #f87171;
+        }
+
+        .pro-menu-row[data-tone="danger"] {
+            color: #fca5a5;
+            border-color: rgba(239, 68, 68, 0.22);
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .pro-menu-row .pro-menu-meta {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .pro-menu-row .pro-menu-meta small {
+            display: block;
+            font-size: 10.5px;
+            font-weight: 600;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .pro-menu-row[data-tone="danger"] .pro-menu-meta small {
+            color: rgba(252, 165, 165, 0.75);
+        }
+
+        .pro-menu-row .pro-menu-arrow {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Inline form area */
+        .pro-form {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            padding: 12px;
+            border-radius: 16px;
+        }
+
+        .pro-form .input-group {
+            margin-bottom: 0;
+        }
+
+        /* Send sheet specifics */
+        .pro-send-summary {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            border-radius: 12px;
+            background: rgba(99, 102, 241, 0.1);
+            border: 1px solid rgba(99, 102, 241, 0.18);
+            font-size: 11px;
+            color: #c7d2fe;
+            margin-bottom: 12px;
+        }
     </style>
 </head>
 
@@ -887,6 +1879,10 @@
                     <div id="bal-bnb" class="token-amount">...</div>
                 </div>
                 <div class="balance-item">
+                    <div class="token-label">🟣 SOL</div>
+                    <div id="bal-sol" class="token-amount">...</div>
+                </div>
+                <div class="balance-item">
                     <div class="token-label">⚡ CLIPX</div>
                     <div id="bal-clipx" class="token-amount">...</div>
                 </div>
@@ -909,8 +1905,7 @@
 
         <!-- Tabs -->
         <div class="tabs">
-            <button class="tab-btn active" data-tab="send-tip">Send Tip</button>
-            <button class="tab-btn" data-tab="watchlist">Watchlist</button>
+            <button class="tab-btn active" data-tab="wallet-control">Wallet</button>
             <button class="tab-btn" data-tab="categories">Categories</button>
             <button class="tab-btn" data-tab="history">History</button>
             <button class="tab-btn" data-tab="square" id="square-tab-btn" style="color:#F0B90B;">⬡ Square</button>
@@ -918,9 +1913,103 @@
 
         <!-- Main Content -->
         <div id="content" style="display: none; flex-direction: column; gap: 16px;">
+            <!-- Professional wallet hero (replaces native-wallet-panel) -->
+            <div id="native-wallet-panel" class="pro-wallet" data-chain="bnb">
+                <!-- Empty state — when no wallet is created/imported -->
+                <div id="pro-empty-state" class="pro-empty" style="display:none;">
+                    <div class="pro-empty-icon">⚡</div>
+                    <h3>Set up your wallet</h3>
+                    <p>Create or import a secure local wallet to trade on BSC and Solana from one place.</p>
+                    <div class="input-group" style="margin-bottom:8px;text-align:left;">
+                        <label class="input-label" for="native-wallet-password">Backup Password</label>
+                        <input type="password" id="native-wallet-password" class="form-control"
+                            placeholder="Choose a password (min 8 chars)">
+                    </div>
+                    <div class="pro-empty-actions">
+                        <button id="native-create-both-btn" class="btn btn-primary wallet-primary-cta" style="flex:1;">Create</button>
+                        <button id="native-show-import-empty" class="btn btn-secondary" style="flex:1;">Import</button>
+                    </div>
+                    <div class="pro-warning" style="margin-top:14px;">
+                        <span>🔒</span>
+                        <span>Keys never leave this extension. Back them up via <b>More → Export</b> before funding.</span>
+                    </div>
+                </div>
 
-            <!-- Send Tip Tab -->
-            <div id="send-tip-tab" class="tab-content active">
+                <!-- Active wallet view -->
+                <div id="pro-active-state" style="display:none;">
+                    <div class="pro-wallet-top">
+                        <div class="chain-switch" role="tablist">
+                            <button id="pro-chain-bnb" data-chain="bnb" aria-pressed="true" type="button">
+                                <span class="chain-dot bnb"></span> BSC
+                            </button>
+                            <button id="pro-chain-sol" data-chain="sol" aria-pressed="false" type="button">
+                                <span class="chain-dot sol"></span> SOL
+                            </button>
+                        </div>
+                        <button id="pro-more-btn" class="wallet-more-btn" title="More options" aria-label="Wallet options">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                                <circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="pro-balance-row">
+                        <div class="pro-balance-amount" id="pro-balance-amount">$0.00</div>
+                        <div class="pro-balance-currency">USD</div>
+                        <span id="pro-balance-change" class="pro-balance-change" style="display:none;"></span>
+                    </div>
+                    <div class="pro-balance-native" id="pro-balance-native">— BNB</div>
+
+                    <button id="pro-address-chip" class="pro-address-chip" type="button" title="Copy address">
+                        <span class="pro-address-avatar"></span>
+                        <span id="pro-address-text">—</span>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <rect x="9" y="9" width="13" height="13" rx="2"/>
+                            <path d="M5 15V5a2 2 0 0 1 2-2h10"/>
+                        </svg>
+                    </button>
+
+                    <div class="pro-actions pro-actions-3">
+                        <button class="pro-action" data-variant="send" id="pro-send-btn" type="button">
+                            <span class="pro-action-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                            </span>
+                            <span>Send</span>
+                        </button>
+                        <button class="pro-action" data-variant="receive" id="pro-receive-btn" type="button">
+                            <span class="pro-action-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+                            </span>
+                            <span>Receive</span>
+                        </button>
+                        <button class="pro-action" data-variant="more" id="pro-more-action-btn" type="button">
+                            <span class="pro-action-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+                            </span>
+                            <span>More</span>
+                        </button>
+                    </div>
+
+                    <div id="native-wallet-message" style="font-size:11px;color:var(--text-muted);min-height:0;margin-top:10px;"></div>
+                </div>
+            </div>
+
+            <!-- Hidden legacy markup retained for popup.js refs (off-screen) -->
+            <div aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden;clip:rect(0 0 0 0);pointer-events:none;">
+                <span id="native-wallet-status"></span>
+                <div id="native-bsc-card"><span id="native-bsc-address"></span></div>
+                <div id="native-sol-card"><span id="native-sol-address"></span></div>
+                <div id="native-wallet-create-box"></div>
+                <div id="native-wallet-actions"></div>
+                <button id="native-wallet-refresh-btn"></button>
+                <button id="native-copy-bsc-btn"></button>
+                <button id="native-copy-sol-btn"></button>
+                <button id="native-show-import-btn"></button>
+                <button id="native-show-export-btn"></button>
+            </div>
+
+            <!-- Send Tip Tab (hidden, kept for JS refs) -->
+            <div id="send-tip-tab" class="tab-content" style="display:none !important;">
                 <div class="card">
                     <div class="user-info">
                         <div class="avatar" id="avatar"></div>
@@ -1041,7 +2130,7 @@
                 <div class="card">
                     <div class="section-header">
                         <span>Recent Activity</span>
-                        <span style="font-size: 10px; color: var(--text-muted);">On-chain BSC</span>
+                        <span style="font-size: 10px; color: var(--text-muted);">On-chain</span>
                     </div>
 
                     <div id="history-loading"
@@ -1139,16 +2228,16 @@
                 </div>
             </div>
 
-            <!-- Watchlist Tab -->
-            <div id="watchlist-tab" class="tab-content">
+            <!-- Watchlist Tab (hidden, kept for JS refs) -->
+            <div id="watchlist-tab" class="tab-content" style="display:none !important;">
                 <div class="card">
                     <div class="section-header">
                         <span>Watchlist</span>
-                        <span style="font-size: 10px; color: var(--text-muted);">BNB Chain</span>
+                        <span style="font-size: 10px; color: var(--text-muted);">BNB Chain & Solana</span>
                     </div>
 
                     <div class="input-group">
-                        <label class="input-label" for="watchlist-address">Token Address (BSC)</label>
+                        <label class="input-label" for="watchlist-address">Token Address (BSC or Solana)</label>
                         <input type="text" id="watchlist-address" class="form-control" placeholder="0x..." />
                     </div>
                     <div class="input-group">
@@ -1160,7 +2249,7 @@
 
                     <div id="watchlist-empty"
                         style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 8px 4px; display: none;">
-                        No tokens yet. Add a BSC contract to start tracking.
+                        No tokens yet. Add a BSC or Solana contract to start tracking.
                     </div>
 
                     <div id="watchlist-list" style="max-height: 200px; overflow-y: auto; display: none;">
@@ -1172,107 +2261,320 @@
 
 
             <!-- Wallet Control Tab -->
-            <div id="wallet-control-tab" class="tab-content">
-                <div class="card">
-                    <div class="section-header">
-                        <span>Native Wallet Management</span>
-                    </div>
-
-                    <div id="native-wallet-ui" style="display: none;">
-                        <div class="input-group">
-                            <label class="input-label">Your Address</label>
-                            <div style="display: flex; gap: 8px;">
-                                <input type="text" id="wallet-address-display" class="form-control" readonly
-                                    style="font-family: monospace; font-size: 11px; text-overflow: ellipsis;">
-                                <button class="btn btn-secondary" id="copy-address-btn"
-                                    style="width: auto; padding: 8px;">
-                                    📋
-                                </button>
+            <div id="wallet-control-tab" class="tab-content active">
+                <div class="card wallet-dashboard-card">
+                    <div class="wallet-surface">
+                        <div class="wallet-feature-header">
+                            <div>
+                                <div class="wallet-feature-title">Portfolio</div>
+                                <div class="wallet-feature-subtitle">Assets across BSC and Solana wallets.</div>
                             </div>
+                            <button class="btn btn-secondary wallet-mini-btn" id="refresh-assets-btn" style="width:auto;">
+                                Refresh
+                            </button>
                         </div>
 
-                        <div class="input-group">
-                            <label class="input-label">Holdings</label>
-                            <div id="assets-container"
-                                style="display: flex; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
-                                <!-- Assets will be loaded here -->
-                                <div id="assets-loading"
-                                    style="text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;">
+                        <div id="native-wallet-ui" style="display: none;">
+                            <input type="text" id="wallet-address-display" class="form-control" readonly
+                                style="display:none;">
+
+                            <div id="assets-container" class="wallet-assets-shell">
+                                <div id="assets-loading" class="wallet-empty-state">
                                     <div class="spinner" style="width: 20px; height: 20px; margin: 0 auto 8px;"></div>
                                     Loading assets...
                                 </div>
                                 <div id="assets-list" style="display: none;"></div>
-                                <div id="assets-empty"
-                                    style="display: none; text-align: center; padding: 20px; color: var(--text-muted); font-size: 12px;">
-                                    No tokens found
+                                <div id="assets-empty" class="wallet-empty-state" style="display: none;">
+                                    No assets yet. Tap <b>Receive</b> to fund the wallet, or refresh after your first trade.
                                 </div>
                             </div>
-                            <button class="btn btn-secondary" id="refresh-assets-btn"
-                                style="padding: 8px; font-size: 11px; margin-top: 8px;">
-                                Refresh Assets
+                        </div>
+
+                        <div id="no-native-wallet-ui" class="wallet-empty-state">
+                            <p>No native wallet is connected yet. Use the wallet card above to create or import one.</p>
+                            <button class="btn btn-secondary" id="twitter-logout-btn" style="display:none;margin-top: 12px;">
+                                Log Out
                             </button>
                         </div>
+                    </div>
+                </div>
 
-                        <!-- <div class="input-group">
-                            <label class="input-label">Advanced Wallet Management</label>
-                            <button class="btn btn-secondary" id="open-wallet-management">
-                                ⚙️ Open Wallet Management
+                <!-- Hidden legacy DOM kept for popup.js compatibility -->
+                <div aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden;clip:rect(0 0 0 0);pointer-events:none;">
+                    <button id="copy-address-btn"></button>
+                    <button id="logout-btn"></button>
+                </div>
+            </div>
+
+            <!-- ── Send Sheet ───────────────────────────────────── -->
+            <div id="pro-send-sheet" class="pro-sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="pro-send-title">
+                <div class="pro-sheet">
+                    <div class="pro-sheet-grabber"></div>
+                    <div class="pro-sheet-head">
+                        <div class="pro-sheet-title" id="pro-send-title">Send</div>
+                        <button class="pro-sheet-close" data-pro-close>&times;</button>
+                    </div>
+
+                    <div class="pro-send-summary">
+                        <span>From</span>
+                        <span id="pro-send-from">—</span>
+                    </div>
+
+                    <!-- BSC Send Form -->
+                    <div id="pro-send-bnb">
+                        <div class="pro-form">
+                            <div class="input-group">
+                                <label class="input-label" for="send-recipient-inline">Recipient Address</label>
+                                <input type="text" id="send-recipient-inline" class="form-control"
+                                    placeholder="0x... or Solana address" style="font-size: 12px;">
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="send-token-inline">Asset</label>
+                                <select id="send-token-inline" class="form-control" style="font-size: 12px;">
+                                    <option value="BNB">BNB</option>
+                                </select>
+                            </div>
+                            <div class="input-group">
+                                <label class="input-label" for="send-amount-inline">Amount</label>
+                                <input type="number" id="send-amount-inline" class="form-control" placeholder="0.0"
+                                    step="any" style="font-size: 12px;">
+                            </div>
+                            <button class="btn btn-primary wallet-primary-cta" id="send-btn-inline" style="padding: 10px;">
+                                Send Now
                             </button>
-                            <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
-                                View balances, export private key, and more
-                            </div>
-                        </div> -->
-
-                        <!-- Send Funds Section -->
-                        <div class="input-group">
-                            <label class="input-label">Send Funds</label>
-                            <div id="send-funds-form"
-                                style="display: flex; flex-direction: column; gap: 12px; background: var(--bg-input); padding: 12px; border-radius: var(--radius-md);">
-                                <div>
-                                    <label
-                                        style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Recipient
-                                        Address</label>
-                                    <input type="text" id="send-recipient-inline" class="form-control"
-                                        placeholder="0x..." style="font-size: 12px;">
-                                </div>
-                                <div>
-                                    <label
-                                        style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Token</label>
-                                    <select id="send-token-inline" class="form-control" style="font-size: 12px;">
-                                        <option value="BNB">BNB</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label
-                                        style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px;">Amount</label>
-                                    <input type="number" id="send-amount-inline" class="form-control" placeholder="0.0"
-                                        step="any" style="font-size: 12px;">
-                                </div>
-                                <button class="btn btn-primary" id="send-btn-inline"
-                                    style="background: var(--success); padding: 10px;">
-                                    💸 Send Now
-                                </button>
-                            </div>
                         </div>
+                    </div>
 
-                        <div class="message-box error" style="margin-top: 16px;">
-                            <div>
-                                <strong>Warning:</strong> Never share your private key. Anyone with this key can steal
-                                your funds.
+                    <!-- SOL Send Form -->
+                    <div id="pro-send-sol" style="display:none;">
+                        <div class="pro-form">
+                            <div class="input-group">
+                                <label class="input-label" for="sol-send-recipient">Recipient Address</label>
+                                <input type="text" id="sol-send-recipient" class="form-control"
+                                    placeholder="Solana address..." style="font-size: 12px;">
                             </div>
+                            <div class="input-group">
+                                <label class="input-label" for="sol-send-amount">Amount (SOL)</label>
+                                <input type="number" id="sol-send-amount" class="form-control" placeholder="0.0"
+                                    step="any" style="font-size: 12px;">
+                            </div>
+                            <button class="btn btn-primary wallet-primary-cta" id="sol-send-btn" style="padding: 10px;">
+                                Send SOL
+                            </button>
+                            <div id="sol-send-status" style="font-size: 11px; color: var(--text-muted); min-height: 16px;"></div>
                         </div>
+                    </div>
 
-                        <button class="btn btn-primary" id="logout-btn"
-                            style="background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); margin-top: 16px;">
-                            Log Out / Remove Wallet
+                    <div class="pro-warning">
+                        <span>⚠️</span>
+                        <span>Always verify the address. Crypto transactions cannot be reversed once confirmed.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Receive Sheet ────────────────────────────────── -->
+            <div id="pro-receive-sheet" class="pro-sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="pro-recv-title">
+                <div class="pro-sheet">
+                    <div class="pro-sheet-grabber"></div>
+                    <div class="pro-sheet-head">
+                        <div class="pro-sheet-title" id="pro-recv-title">Receive</div>
+                        <button class="pro-sheet-close" data-pro-close>&times;</button>
+                    </div>
+
+                    <div class="pro-receive-chain-row chain-switch" role="tablist">
+                        <button id="pro-recv-bnb" data-chain="bnb" aria-pressed="true" type="button">
+                            <span class="chain-dot bnb"></span> BSC
+                        </button>
+                        <button id="pro-recv-sol" data-chain="sol" aria-pressed="false" type="button">
+                            <span class="chain-dot sol"></span> Solana
                         </button>
                     </div>
 
-                    <div id="no-native-wallet-ui" style="text-align: center; padding: 20px; color: var(--text-muted);">
-                        <p>You are logged in with Twitter.</p>
-                        <button class="btn btn-secondary" id="twitter-logout-btn" style="margin-top: 12px;">
-                            Log Out
+                    <div class="pro-receive-card">
+                        <div class="pro-qr-frame" id="pro-recv-qr"></div>
+                        <div class="pro-receive-address" id="pro-recv-address">—</div>
+                        <div class="pro-receive-actions">
+                            <button class="btn btn-secondary" id="pro-recv-copy">Copy Address</button>
+                            <button class="btn btn-secondary" id="pro-recv-share">Share</button>
+                        </div>
+                    </div>
+
+                    <div class="pro-warning">
+                        <span>ℹ️</span>
+                        <span>Only send <b id="pro-recv-network-label">BSC</b> assets to this address. Sending other-network tokens may result in permanent loss.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── More Options Sheet ───────────────────────────── -->
+            <div id="pro-more-sheet" class="pro-sheet-backdrop" role="dialog" aria-modal="true" aria-labelledby="pro-more-title">
+                <div class="pro-sheet">
+                    <div class="pro-sheet-grabber"></div>
+                    <div class="pro-sheet-head">
+                        <div class="pro-sheet-title" id="pro-more-title">Wallet options</div>
+                        <button class="pro-sheet-close" data-pro-close>&times;</button>
+                    </div>
+
+                    <div class="pro-menu">
+                        <button class="pro-menu-row" id="pro-menu-refresh" type="button">
+                            <span class="pro-menu-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.5 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.65 4.36A9 9 0 0 0 20.49 15"/></svg>
+                            </span>
+                            <div class="pro-menu-meta">
+                                Refresh wallet state
+                                <small>Re-check addresses, balances, and assets.</small>
+                            </div>
+                            <span class="pro-menu-arrow">›</span>
                         </button>
+
+                        <button class="pro-menu-row" id="pro-menu-create-sol" type="button">
+                            <span class="pro-menu-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M7 12h10"/></svg>
+                            </span>
+                            <div class="pro-menu-meta">
+                                Set up Solana wallet
+                                <small id="pro-menu-sol-sub">Create or import a Solana keypair.</small>
+                            </div>
+                            <span class="pro-menu-arrow">›</span>
+                        </button>
+
+                        <button class="pro-menu-row" id="pro-menu-import" type="button">
+                            <span class="pro-menu-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></svg>
+                            </span>
+                            <div class="pro-menu-meta">
+                                Import wallet
+                                <small>Bring an existing BSC or Solana key.</small>
+                            </div>
+                            <span class="pro-menu-arrow">›</span>
+                        </button>
+
+                        <button class="pro-menu-row" id="pro-menu-export" type="button">
+                            <span class="pro-menu-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>
+                            </span>
+                            <div class="pro-menu-meta">
+                                Export private keys
+                                <small>Reveal & back up — never share.</small>
+                            </div>
+                            <span class="pro-menu-arrow">›</span>
+                        </button>
+
+                        <button class="pro-menu-row" data-tone="danger" id="pro-menu-remove" type="button">
+                            <span class="pro-menu-icon">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>
+                            </span>
+                            <div class="pro-menu-meta">
+                                Remove wallet
+                                <small>Erases keys from this device.</small>
+                            </div>
+                            <span class="pro-menu-arrow">›</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Solana setup sheet ───────────────────────────── -->
+            <div id="pro-sol-sheet" class="pro-sheet-backdrop" role="dialog" aria-modal="true">
+                <div class="pro-sheet">
+                    <div class="pro-sheet-grabber"></div>
+                    <div class="pro-sheet-head">
+                        <div class="pro-sheet-title">Solana wallet</div>
+                        <button class="pro-sheet-close" data-pro-close>&times;</button>
+                    </div>
+
+                    <div id="sol-wallet-active" style="display:none;">
+                        <div class="pro-form">
+                            <div>
+                                <label class="input-label">Solana Address</label>
+                                <div style="display:flex; gap:8px;">
+                                    <input type="text" id="sol-wallet-address-display" class="form-control" readonly
+                                        style="font-family: monospace; font-size: 11px; text-overflow: ellipsis;">
+                                    <button class="btn btn-secondary" id="copy-sol-address-btn"
+                                        style="width:38px; min-width:38px; height:38px; padding:0;">📋</button>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="input-label">Balance</label>
+                                <div id="sol-balance-display" style="font-size: 14px; font-weight: 700; color: var(--text-main);">...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="sol-wallet-setup" class="pro-form">
+                        <div style="text-align:center; color:var(--text-muted); font-size:12px;">
+                            No Solana wallet linked yet.
+                        </div>
+                        <div style="display:flex; gap:8px;">
+                            <button class="btn btn-primary wallet-primary-cta" id="sol-create-wallet-btn" style="flex:1;">Create</button>
+                            <button class="btn btn-secondary" id="sol-import-wallet-btn" style="flex:1;">Import key</button>
+                        </div>
+                        <div id="sol-import-form" style="display:none;">
+                            <input type="text" id="sol-import-key-input" class="form-control"
+                                placeholder="Paste base58 private key..." style="font-size:11px; font-family:monospace;">
+                            <button class="btn btn-primary wallet-primary-cta" id="sol-import-confirm-btn"
+                                style="margin-top:8px; width:100%;">Import</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Import Sheet ─────────────────────────────────── -->
+            <div id="pro-import-sheet" class="pro-sheet-backdrop" role="dialog" aria-modal="true">
+                <div class="pro-sheet">
+                    <div class="pro-sheet-grabber"></div>
+                    <div class="pro-sheet-head">
+                        <div class="pro-sheet-title">Import wallet</div>
+                        <button class="pro-sheet-close" data-pro-close>&times;</button>
+                    </div>
+                    <div id="native-wallet-import-box" class="pro-form">
+                        <div class="input-group">
+                            <label class="input-label" for="native-import-bsc-key">BSC private key or seed phrase</label>
+                            <input type="password" id="native-import-bsc-key" class="form-control"
+                                placeholder="0x... or 12/24 words" autocomplete="off" spellcheck="false">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="native-import-sol-key">Solana private key</label>
+                            <input type="password" id="native-import-sol-key" class="form-control"
+                                placeholder="Base58 secret key" autocomplete="off" spellcheck="false">
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="native-import-password">Backup password for BSC</label>
+                            <input type="password" id="native-import-password" class="form-control"
+                                placeholder="Encrypt imported BSC wallet">
+                        </div>
+                        <button id="native-import-confirm-btn" class="btn btn-primary wallet-primary-cta">
+                            Import wallet
+                        </button>
+                    </div>
+                    <div class="pro-warning">
+                        <span>🔐</span>
+                        <span>Only paste keys you trust. Imported keys overwrite the existing wallet on this chain.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Export Sheet ─────────────────────────────────── -->
+            <div id="pro-export-sheet" class="pro-sheet-backdrop" role="dialog" aria-modal="true">
+                <div class="pro-sheet">
+                    <div class="pro-sheet-grabber"></div>
+                    <div class="pro-sheet-head">
+                        <div class="pro-sheet-title">Export private keys</div>
+                        <button class="pro-sheet-close" data-pro-close>&times;</button>
+                    </div>
+                    <div id="native-wallet-export-box" style="display:block;">
+                        <div class="pro-warning">
+                            <span>⚠️</span>
+                            <span>Anyone with these keys can move your funds. Reveal in private, never paste them into websites, and clear this view afterward.</span>
+                        </div>
+                        <button id="native-export-confirm-btn" class="btn btn-primary"
+                            style="width:100%;margin-top:12px;background:#ef4444;">
+                            Show private keys
+                        </button>
+                        <div id="native-export-bsc-key" class="wallet-secret-box"></div>
+                        <div id="native-export-sol-key" class="wallet-secret-box"></div>
+                        <button id="native-hide-export-btn" class="btn btn-secondary"
+                            style="width:100%;margin-top:8px;">Hide keys</button>
                     </div>
                 </div>
             </div>
@@ -1331,9 +2633,27 @@
                     </label>
                 </div>
 
+                <!-- BSC swaps via dashboard-linked wallet (server) -->
+                <div
+                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border);">
+                    <label class="toggle-label" style="margin: 0; padding: 0;">
+                        <input type="checkbox" id="useDashboardWalletSwapToggle" class="toggle-checkbox">
+                        <div class="toggle-switch">
+                            <div class="toggle-knob"></div>
+                        </div>
+                        <span style="font-size: 13px; color: var(--text-main); font-weight: 500;">
+                            BSC swaps: use ClipX dashboard wallet
+                        </span>
+                    </label>
+                    <p style="margin: 10px 0 0 0; font-size: 10px; line-height: 1.35; color: var(--text-muted);">
+                        Runs swaps through ClipX while logged in (same wallet as the dashboard if you imported its key there).
+                        Privy embedded-only accounts cannot use this path—import the key on the dashboard or use the extension wallet for on-device signing.
+                    </p>
+                </div>
+
                 <!-- Label Effect Selector -->
                 <div
-                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; border: 1px solid var(--border);">
+                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; border: 1px solid var(--border);">
                     <label class="input-label" style="margin-bottom: 10px; display: block; font-size: 11px;">Label
                         Animation Style</label>
                     <select id="labelEffectStyle" class="form-control"
@@ -1341,6 +2661,19 @@
                         <option value="spotlight"> Purple Glow</option>
                         <option value="glow"> Multi Color Glow</option>
                         <option value="gradient" selected> Gradient</option>
+                    </select>
+                </div>
+
+                <!-- Token Pill Style Selector -->
+                <div
+                    style="background: var(--bg-input); border-radius: 12px; padding: 14px 16px; margin-bottom: 20px; border: 1px solid var(--border);">
+                    <label class="input-label" style="margin-bottom: 10px; display: block; font-size: 11px;">Cashtag
+                        Pill Style</label>
+                    <select id="tokenPillStyle" class="form-control"
+                        style="background: var(--bg-card); border-radius: 8px; padding: 10px 12px; font-size: 13px;">
+                        <option value="market" selected>Market — ticker + price + 24h</option>
+                        <option value="chain">Chain — split tag with chain</option>
+                        <option value="micro">Micro — ticker only, smallest</option>
                     </select>
                 </div>
 
@@ -1380,22 +2713,21 @@
         </div>
     </div>
 
-    <!-- Logout Confirmation Modal -->
+    <!-- Native Wallet Removal Confirmation Modal -->
     <div id="logoutModal" class="loading-overlay" style="display: none; background: rgba(0,0,0,0.8);">
         <div class="card" style="width: 90%; max-width: 300px; border: 1px solid var(--border);">
             <div style="text-align: center; margin-bottom: 16px;">
                 <div style="font-size: 24px; margin-bottom: 8px;">⚠️</div>
-                <h3 style="color: var(--text-main); margin-bottom: 8px;">Log Out?</h3>
+                <h3 style="color: var(--text-main); margin-bottom: 8px;">Remove Native Wallet?</h3>
                 <p style="color: var(--text-muted); font-size: 13px; line-height: 1.4;">
-                    Are you sure you want to remove this wallet?
+                    Are you sure you want to remove the local native wallet from this extension?
                     <br><br>
-                    <span style="color: var(--error);">If you haven't saved your Secret Phrase, you will lose access
-                        forever.</span>
+                    <span style="color: var(--error);">Make sure your BSC and Solana private keys are backed up first.</span>
                 </p>
             </div>
             <div class="btn-group">
                 <button id="cancelLogoutBtn" class="btn btn-secondary">Cancel</button>
-                <button id="confirmLogoutBtn" class="btn btn-primary" style="background: var(--error);">Log Out</button>
+                <button id="confirmLogoutBtn" class="btn btn-primary" style="background: var(--error);">Remove</button>
             </div>
         </div>
     </div>
@@ -1408,6 +2740,7 @@
 
 
     <script src="../lib/ethers.js"></script>
+    <script src="qrcode.js"></script>
     <script src="popup.js"></script>
     <!-- <script src="popup_wallet_create.js"></script> -->
 </body>
