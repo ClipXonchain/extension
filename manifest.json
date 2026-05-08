@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipX - Track & Trade on X",
-  "version": "1.50.0",
+  "version": "1.51.0",
   "description": "ClipX - Your Co-Pilot & Profile Intelligence for X",
   "icons": {
     "16": "public/icon.png",

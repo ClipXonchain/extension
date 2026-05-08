@@ -109,6 +109,84 @@ function clipxSyncPostPageContextAttribute() {
     } catch (e) {
         /* ignore */
     }
+    try {
+        clipxSyncXAppearanceAttribute();
+    } catch (e) {
+        /* ignore */
+    }
+}
+
+/** Parse computed background-color / rgb() string into RGBA. */
+function clipxParseRgbColor(value) {
+    if (!value || typeof value !== 'string') return null;
+    const m = value.trim().match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/i);
+    if (!m) return null;
+    return {
+        r: +m[1],
+        g: +m[2],
+        b: +m[3],
+        a: m[4] !== undefined ? +m[4] : 1,
+    };
+}
+
+/** Walk up until a non-transparent background; return perceptual luminance 0–255 or null. */
+function clipxSurfaceLuminanceFromEl(startEl) {
+    let node = startEl;
+    for (let i = 0; i < 14 && node; i++) {
+        let c;
+        try {
+            c = getComputedStyle(node).backgroundColor;
+        } catch {
+            return null;
+        }
+        const p = clipxParseRgbColor(c);
+        if (p && p.a >= 0.06) {
+            return 0.2126 * p.r + 0.7152 * p.g + 0.0722 * p.b;
+        }
+        node = node.parentElement;
+    }
+    return null;
+}
+
+/**
+ * Light vs dark X timeline: html[data-theme] / data-color-theme are often missing or inconsistent.
+ * Prefer data-color-mode, else first opaque surface (tweet card / column), else prefers-color-scheme.
+ */
+function clipxInferXUiAppearance() {
+    const root = document.documentElement;
+    const raw = (
+        root.getAttribute('data-color-mode') ||
+        root.getAttribute('data-theme') ||
+        root.getAttribute('data-color-theme') ||
+        ''
+    ).toLowerCase();
+    if (raw === 'dark' || raw === 'dim') return 'dark';
+    if (raw === 'light') return 'light';
+
+    const probes = [
+        document.querySelector('article[data-testid="tweet"]'),
+        document.querySelector('[data-testid="primaryColumn"]'),
+        document.querySelector('main[role="main"]'),
+        document.getElementById('react-root'),
+        document.body,
+    ];
+    for (const el of probes) {
+        if (!el) continue;
+        const lum = clipxSurfaceLuminanceFromEl(el);
+        if (lum != null) return lum < 90 ? 'dark' : 'light';
+    }
+
+    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) return 'dark';
+    return 'light';
+}
+
+let _clipxLastXAppearance = '';
+
+function clipxSyncXAppearanceAttribute() {
+    const next = clipxInferXUiAppearance();
+    if (next === _clipxLastXAppearance) return;
+    _clipxLastXAppearance = next;
+    document.documentElement.setAttribute('data-clipx-x-appearance', next);
 }
 
 // Inject CSS for verification badge
@@ -157,7 +235,7 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
             line-height: 1 !important;
             font-size: 11px !important;
             font-weight: 760 !important;
-            padding: 2px 8px !important;
+            padding: 2px 4px !important;
         }
 
         .clipx-label-spotlight::after {
@@ -172,30 +250,37 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
             pointer-events: none !important;
         }
 
-        /* GLOW STYLE */
-        @keyframes clipx-shimmer {
-            0% { background-position: -200% 0; }
-            100% { background-position: 200% 0; }
-        }
-
-        @keyframes clipx-breathe {
-            0%, 100% { box-shadow: 0 0 8px var(--glow-color); }
-            50% { box-shadow: 0 0 18px var(--glow-color); }
-        }
-
+        /*
+         * GLOW option: masked stroke (::before) in green tones; deeper green fill (~1.5× prior opacity).
+         */
         .clipx-label-glow {
-            --glow-color: rgba(168, 85, 247, 0.6);
+            position: relative !important;
+            overflow: visible !important;
             border-radius: 0 !important;
-            color: #fff !important;
-            background: linear-gradient(90deg, #ec4899 0%, #8b5cf6 24%, #06b6d4 48%, #10b981 72%, #f59e0b 100%) !important;
-            background-size: 200% 100% !important;
-            border: 1px solid rgba(255, 255, 255, 0.26) !important;
-            text-shadow: 0 0 6px rgba(0, 0, 0, 0.45) !important;
-            animation: clipx-shimmer 3s infinite linear, clipx-breathe 2.5s infinite ease-in-out !important;
-            line-height: 1 !important;
-            font-size: 11px !important;
+            background: linear-gradient(90deg, rgba(4, 120, 87, 0.50) 0%, rgba(5, 150, 105, 0.44) 45%, rgba(16, 185, 129, 0.38) 100%) !important;
+            box-shadow: none !important;
+            text-shadow: none !important;
+            font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif !important;
             font-weight: 760 !important;
-            padding: 2px 8px !important;
+            font-size: 11px !important;
+            line-height: 1 !important;
+            padding: 2px 4px !important;
+            color: #0f172a !important;
+            --glow-color: rgba(5, 120, 90, 0.45);
+        }
+        .clipx-label-glow::before {
+            content: '' !important;
+            position: absolute !important;
+            inset: -1.2px !important;
+            border-radius: 0 !important;
+            padding: 1.2px !important;
+            background: linear-gradient(90deg, #064e3b 0%, #0f766e 22%, #0d9488 44%,rgb(23, 120, 140) 62%,rgba(78, 127, 234, 0.76) 82%,rgb(84, 77, 209) 100%) !important;
+            -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0) !important;
+            -webkit-mask-composite: xor !important;
+            mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0) !important;
+            mask-composite: exclude !important;
+            pointer-events: none !important;
+            z-index: -1 !important;
         }
 
     
@@ -211,7 +296,9 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
             font-weight: 760 !important;
             font-size: 11px !important;
             line-height: 1 !important;
-            padding: 2px 8px !important;
+            padding: 2px 4px !important;
+            /* Default when X omits data-theme: avoid white/washed text on translucent fill (see ClipX Extension). */
+            color: #0f172a !important;
         }
         /* Box stroke (border) - 40% thinner (1.2px vs 2px) */
         .clipx-label-gradient::before {
@@ -220,7 +307,7 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
             inset: -1.2px !important;
             border-radius: 0 !important;
             padding: 1.2px !important;
-            background: linear-gradient(90deg, #FF00B2 21%, #1B49FF 100%) !important;
+            background: linear-gradient(90deg, #ff00b2 0%, #f72585 20%, #b5179e 44%, #6366f1 68%, #38bdf8 90%, #0ea5e9 100%) !important;
             -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0) !important;
             -webkit-mask-composite: xor !important;
             mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0) !important;
@@ -257,11 +344,11 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
             font-weight: 760 !important;
         }
 
-        /* Post permalink only (/handle/status/id): roomier label inset, tighter gap after timestamp */
+        /* Post permalink only (/handle/status/id): same tight horizontal inset as feed; gap after timestamp below */
         html[data-clipx-page="status"] .clipx-feed-label.clipx-label-gradient,
         html[data-clipx-page="status"] .clipx-feed-label.clipx-label-glow,
         html[data-clipx-page="status"] .clipx-feed-label.clipx-label-spotlight {
-            padding: 3px 14px !important;
+            padding: 2px 4px !important;
             font-weight: 760 !important;
         }
         html[data-clipx-page="status"] .clipx-inline-tweet-meta {
@@ -336,7 +423,9 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
         html[data-theme="light"] .clipx-profile-label-badge,
         html[data-theme="light"] .clipx-user-list-label,
         html[data-color-theme="light"] .clipx-label-gradient,
-        html[data-theme="light"] .clipx-label-gradient {
+        html[data-theme="light"] .clipx-label-gradient,
+        html[data-color-theme="light"] .clipx-label-glow,
+        html[data-theme="light"] .clipx-label-glow {
             color: #000 !important;
         }
         html[data-color-theme="dark"] .clipx-feed-label,
@@ -350,26 +439,50 @@ if (!document.getElementById('clipx-verification-badge-styles')) {
         body.LightsOut .clipx-user-list-label,
         html[data-color-theme="dark"] .clipx-label-gradient,
         html[data-theme="dark"] .clipx-label-gradient,
-        body.LightsOut .clipx-label-gradient {
+        html[data-color-theme="dark"] .clipx-label-glow,
+        html[data-theme="dark"] .clipx-label-glow,
+        body.LightsOut .clipx-label-gradient,
+        body.LightsOut .clipx-label-glow {
             color: #fff !important;
         }
-        /* Keep effect-specific label colors intact in both X light/dark themes. */
+        /* Spotlight: white text on saturated purple fill */
         .clipx-label-spotlight,
-        .clipx-label-glow,
         html[data-color-theme="light"] .clipx-label-spotlight,
         html[data-theme="light"] .clipx-label-spotlight,
         html[data-color-theme="dark"] .clipx-label-spotlight,
         html[data-theme="dark"] .clipx-label-spotlight,
-        body.LightsOut .clipx-label-spotlight,
-        html[data-color-theme="light"] .clipx-label-glow,
-        html[data-theme="light"] .clipx-label-glow,
-        html[data-color-theme="dark"] .clipx-label-glow,
-        html[data-theme="dark"] .clipx-label-glow,
-        body.LightsOut .clipx-label-glow {
+        body.LightsOut .clipx-label-spotlight {
             color: #fff !important;
+        }
+
+        /*
+         * ClipX-inferred timeline (see clipxSyncXAppearanceAttribute). Overrides html[data-theme]
+         * for gradient + green pill text so light timelines get dark type and dark timelines get light type.
+         */
+        html[data-clipx-x-appearance="light"] .clipx-label-gradient,
+        html[data-clipx-x-appearance="light"] .clipx-label-glow {
+            color: #0a0a0a !important;
+        }
+        html[data-clipx-x-appearance="light"] .clipx-label-glow {
+            text-shadow: none !important;
+        }
+        html[data-clipx-x-appearance="dark"] .clipx-label-gradient {
+            color:rgb(255, 255, 255) !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+        }
+        html[data-clipx-x-appearance="dark"] .clipx-label-glow {
+            color:rgb(255, 255, 255) !important;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
         }
     `;
     document.head.appendChild(style);
+    queueMicrotask(() => {
+        try {
+            clipxSyncXAppearanceAttribute();
+        } catch (e) {
+            /* ignore */
+        }
+    });
 }
 
 // -- Label Effect Style Application --
@@ -3854,7 +3967,7 @@ async function createModal(username, initialView = 'tip', initialAddress = '', a
                         <input type="number" class="clipx-text-input" id="clipx-setting-slippage" value="1" style="font-size: 14px; padding: 8px;">
                     </div>
                     <div>
-                        <label class="clipx-label">Quick Buy Amounts (${_urls.nativeSymbol})</label>
+                        <label class="clipx-label">Quick Buy Amounts (${_modalUrls.nativeSymbol})</label>
                         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
                             <input type="number" class="clipx-text-input" id="clipx-setting-amt1" value="0.1" step="0.1" style="font-size: 14px; padding: 8px;">
                             <input type="number" class="clipx-text-input" id="clipx-setting-amt2" value="0.5" step="0.1" style="font-size: 14px; padding: 8px;">
@@ -7301,48 +7414,24 @@ const ProfileScanner = {
 
         const badge = document.createElement('span');
         badge.className = `clipx-feed-label-${handle} clipx-feed-label`;
-        badge.innerHTML = `🔥 ${data.label}`;
 
-        // NEON GRADIENT BORDER STYLE
-        const borderGradients = {
-            purple: 'linear-gradient(135deg, #a855f7, #ec4899)',
-            red: 'linear-gradient(135deg, #ef4444, #f97316)',
-            green: 'linear-gradient(135deg, #10b981, #06b6d4)',
-            blue: 'linear-gradient(135deg, #3b82f6, #8b5cf6)'
-        };
-        const borderGrad = borderGradients[data.color] || borderGradients.purple;
-
-        // Glow colors for visibility
-        const glowColors = {
-            purple: 'rgba(168, 85, 247, 0.4)',
-            red: 'rgba(239, 68, 68, 0.4)',
-            green: 'rgba(16, 185, 129, 0.4)',
-            blue: 'rgba(245, 248, 37, 0.4)'
-        };
-        const glow = glowColors[data.color] || glowColors.purple;
-
-        badge.style.setProperty('--glow-color', glow);
-
+        // Layout only — fill, stroke, and text color come from .clipx-label-* (ClipX Extension gradient style).
         badge.style.cssText = `
             display: inline-flex;
             align-items: center;
             margin: 0;
             padding: 0;
             border-radius: 0;
-            background: linear-gradient(90deg, rgba(76, 29, 149, 0.92), rgba(91, 33, 182, 0.88)) padding-box, ${borderGrad} border-box;
-            color: #f5f3ff;
-            font-size: 8px; 
+            font-size: 11px;
             font-weight: 760;
             vertical-align: middle;
-            border: 1.5px solid transparent;
             line-height: 1.25;
-            box-shadow: 0 0 6px ${glow};
             max-width: 200px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
         `;
-        badge.innerHTML = data.label;
+        badge.textContent = data.label;
         badge.title = data.label; // Tooltip for full text on hover
 
         const slot = clipxEnsureInlineMetaSlot(container);
@@ -7351,6 +7440,10 @@ const ProfileScanner = {
             if (firstPill) slot.insertBefore(badge, firstPill);
             else slot.appendChild(badge);
             applyLabelStyle(badge);
+            badge.style.removeProperty('color');
+            badge.style.removeProperty('background');
+            badge.style.removeProperty('border');
+            badge.style.removeProperty('box-shadow');
         }
     },
 
@@ -7516,16 +7609,7 @@ const ProfileScanner = {
                 // --- VIEW MODE ---
                 const badge = document.createElement('span');
 
-                // NEON GRADIENT BORDER STYLE
-                const borderGradients = {
-                    purple: 'linear-gradient(135deg, #a855f7, #ec4899)',
-                    red: 'linear-gradient(135deg, #ef4444, #f97316)',
-                    green: 'linear-gradient(135deg, #10b981, #06b6d4)',
-                    blue: 'linear-gradient(135deg, #3b82f6, #8b5cf6)'
-                };
-                const borderGrad = borderGradients[color] || borderGradients.purple;
-
-                // Glow colors for visibility
+                // Glow colors for visibility (--glow-color used when label effect is "glow")
                 const glowColors = {
                     purple: 'rgba(168, 85, 247, 0.4)',
                     red: 'rgba(239, 68, 68, 0.4)',
@@ -7534,24 +7618,20 @@ const ProfileScanner = {
                 };
                 const glow = glowColors[color] || glowColors.purple;
 
-                // Common "Neon Pill" CSS with glow
+                // Layout only — avoid pale inline fill + white text (low contrast in X light mode). Gradient from injected CSS (ClipX Extension).
                 const neonStyle = `
                     display: inline-flex;
                     align-items: center;
                     margin: 0;
                     padding: 0;
                     border-radius: 0;
-                    background: linear-gradient(90deg, rgba(168, 85, 247, 0.15), rgba(255, 255, 255, 0.3), rgba(168, 85, 247, 0.15)) padding-box, ${borderGrad} border-box;
-                    border: 1.5px solid transparent; 
-                    color: white;
-                    font-size: 12px; 
+                    font-size: 12px;
                     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                     font-weight: 760;
                     cursor: pointer;
                     transition: all 0.2s ease;
                     letter-spacing: 0.2px;
                     line-height: normal;
-                    box-shadow: 0 0 10px ${glow};
                     --glow-color: ${glow};
                 `;
 
@@ -7566,6 +7646,10 @@ const ProfileScanner = {
                     badge.innerHTML = `Add Label`;
                     applyLabelStyle(badge);
                 }
+                badge.style.removeProperty('color');
+                badge.style.removeProperty('background');
+                badge.style.removeProperty('border');
+                badge.style.removeProperty('box-shadow');
 
                 badge.onmouseenter = () => {
                     badge.style.transform = 'translateY(-1px)';
@@ -8598,7 +8682,7 @@ async function processUserNameDiv(userNameDiv, handleOverride = null) {
             display: inline-flex;
             align-items: center;
             margin: 0;
-            padding: 2px 8px;
+            padding: 2px 4px;
             border-radius: 0;
             font-size: 10px;
             font-weight: 760;
@@ -10955,6 +11039,9 @@ const observer = new MutationObserver(() => {
         try {
             clipxSyncPostPageContextAttribute();
         } catch (e) { /* ignore */ }
+        try {
+            clipxSyncXAppearanceAttribute();
+        } catch (e) { /* ignore */ }
         addTipButtons();
         // Inject analyze buttons for Intel feature
         try { injectAnalyzeButtons(); } catch (e) { console.error('[ClipX] injectAnalyzeButtons error:', e); }
@@ -11172,6 +11259,28 @@ function init() {
     try {
         clipxSyncPostPageContextAttribute();
     } catch (e) { /* ignore */ }
+    try {
+        clipxSyncXAppearanceAttribute();
+    } catch (e) { /* ignore */ }
+    if (!window.__clipxAppearanceHooked) {
+        window.__clipxAppearanceHooked = true;
+        const appearanceMo = new MutationObserver(() => {
+            try {
+                clipxSyncXAppearanceAttribute();
+            } catch (e) { /* ignore */ }
+        });
+        appearanceMo.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['class', 'style', 'data-color-mode', 'data-theme', 'data-color-theme'],
+        });
+        let appearanceTicks = 0;
+        const appearanceIv = setInterval(() => {
+            try {
+                clipxSyncXAppearanceAttribute();
+            } catch (e) { /* ignore */ }
+            if (++appearanceTicks >= 24) clearInterval(appearanceIv);
+        }, 1250);
+    }
     window.addEventListener('popstate', clipxSyncPostPageContextAttribute);
     if (!window.__clipxHistoryPatched) {
         window.__clipxHistoryPatched = true;
