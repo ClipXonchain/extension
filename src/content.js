@@ -5678,7 +5678,7 @@ function clipxInjectSurfTimelineInner() {
 }
 
 const ProfileScanner = {
-    // Utility for conditional class names (adopted from Frontrun demo)
+    // Utility for conditional class names
     cn(...args) {
         const classes = [];
         for (const arg of args) {
@@ -11371,6 +11371,1138 @@ console.log('[ClipX Content] Ready');
 // ============================================================
 
 // ====================
+// CLIPX INSIGHTS SIDEBAR (X right column embedded card)
+// ====================
+
+let clipxInsightsSidebarEnabled = true;
+let _clipxInsightsInjectTimer = null;
+let _clipxInsPriceInterval = null;    // live-price polling
+
+function clipxInsH(s) {
+    if (s == null) return '';
+    return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+/** Locate X.com's right sidebar column and return the first non-search-row child as our mount slot. */
+function clipxLocateSidebarInsertion(anchorEl) {
+    if (!anchorEl) return null;
+    const findColumn = (e) => {
+        const aside = e.querySelector('aside');
+        if (!aside) return null;
+        let r = aside;
+        for (;;) {
+            const p = r.parentElement;
+            if (!p) break;
+            if (p.children.length >= 2) return p;
+            if (r === e) break;
+            r = p;
+        }
+        return null;
+    };
+    const col = findColumn(anchorEl);
+    if (!col) return null;
+    for (let i = 0; i < col.children.length; i++) {
+        const child = col.children[i];
+        if (child.querySelector('[data-testid="SearchBox_Search_Input"]')) continue;
+        const hasContent = child.children.length > 0 || (child.textContent || '').trim().length > 0;
+        if (hasContent) return { container: col, before: child };
+    }
+    return null;
+}
+
+function clipxFindInsightsSidebarMount() {
+    let col = document.querySelector('div[data-testid="sidebarColumn"]');
+    let m = col ? clipxLocateSidebarInsertion(col) : null;
+    if (m) return m;
+    col = document.querySelector('div[aria-label="Trending"]');
+    if (col) m = clipxLocateSidebarInsertion(col);
+    return m || null;
+}
+
+function clipxRemoveInsightsSidebar() {
+    const el = document.getElementById('clipx-trending-accounts-card');
+    if (el) el.remove();
+    clipxInsDisconnectWs();
+}
+
+// ---- DEDICATED BINANCE WEBSOCKET FOR SIDEBAR LIVE PRICES ----
+
+let _clipxInsWs     = null;
+let _clipxInsWsRetry = null;
+
+const _CLIPX_INS_SYMS = [
+    { wsKey: 'BTCUSDT', label: 'BTC' },
+    { wsKey: 'ETHUSDT', label: 'ETH' },
+    { wsKey: 'BNBUSDT', label: 'BNB' },
+    { wsKey: 'SOLUSDT', label: 'SOL' },
+];
+
+function clipxInsDisconnectWs() {
+    if (_clipxInsWsRetry) { clearTimeout(_clipxInsWsRetry); _clipxInsWsRetry = null; }
+    if (_clipxInsPriceInterval) { clearInterval(_clipxInsPriceInterval); _clipxInsPriceInterval = null; }
+    window.clipxInsOnWsUpdate = null;
+    if (_clipxInsWs) {
+        const ws = _clipxInsWs;
+        _clipxInsWs = null;
+        ws.onclose = null; ws.onerror = null; ws.onmessage = null;
+        try { ws.close(); } catch (e) { /* ignore */ }
+    }
+}
+
+function clipxInsApplyTick(label, price, change) {
+    const prEl = document.getElementById(`clipx-ins-pr-${label}`);
+    const chEl = document.getElementById(`clipx-ins-ch-${label}`);
+    if (!prEl) return;
+    const prev = parseFloat(prEl.dataset.p || price);
+    const ps   = price >= 1000 ? `$${Math.round(price).toLocaleString()}` : `$${Number(price).toFixed(2)}`;
+    if (prEl.textContent !== ps) {
+        prEl.style.transition = 'color 0.35s ease';
+        prEl.style.color = price > prev ? '#22c55e' : price < prev ? '#ef4444' : '';
+        setTimeout(() => { if (prEl) prEl.style.color = ''; }, 600);
+        prEl.textContent = ps;
+    }
+    prEl.dataset.p = price;
+    if (chEl && change != null) {
+        const pos = change >= 0;
+        const ct  = `${pos ? '+' : ''}${Number(change).toFixed(2)}%`;
+        if (chEl.textContent !== ct) { chEl.textContent = ct; chEl.style.color = pos ? '#22c55e' : '#ef4444'; }
+    }
+    // Pulse the live indicator dot
+    const dot = document.getElementById('clipx-ins-live-dot');
+    if (dot) { dot.style.opacity = '1'; setTimeout(() => { if (dot) dot.style.opacity = '0.4'; }, 400); }
+}
+
+function clipxInsConnectWs() {
+    clipxInsDisconnectWs();
+    const streams = _CLIPX_INS_SYMS.map(({ wsKey }) => `${wsKey.toLowerCase()}@ticker`).join('/');
+    const url     = `wss://stream.binance.com:9443/stream?streams=${streams}`;
+    try {
+        const ws = new WebSocket(url);
+        _clipxInsWs = ws;
+        ws.onopen = () => {
+            const dot = document.getElementById('clipx-ins-live-dot');
+            if (dot) { dot.style.background = '#22c55e'; dot.style.opacity = '1'; }
+        };
+        ws.onmessage = (evt) => {
+            try {
+                const msg = JSON.parse(evt.data);
+                const d   = msg.data;
+                if (!d || d.e !== '24hrTicker') return;
+                const sym = _CLIPX_INS_SYMS.find(s => s.wsKey === d.s);
+                if (!sym) return;
+                const price  = parseFloat(d.c);
+                const change = parseFloat(d.P);
+                // Keep the shared cache in sync
+                window.clipxPriceCache = window.clipxPriceCache || {};
+                const cached = window.clipxPriceCache[d.s] || {};
+                window.clipxPriceCache[d.s] = Object.assign(cached, { price, change });
+                // Update sidebar DOM directly
+                clipxInsApplyTick(sym.label, price, change);
+            } catch (e) { /* ignore */ }
+        };
+        ws.onerror = () => {};
+        ws.onclose = () => {
+            _clipxInsWs = null;
+            // Reconnect only if the Market tab price elements are still in the DOM
+            if (document.getElementById('clipx-ins-pr-BTC')) {
+                _clipxInsWsRetry = setTimeout(() => clipxInsConnectWs(), 4000);
+            }
+        };
+    } catch (e) {
+        // Fallback: poll existing cache every 3 s if WS unavailable
+        _clipxInsPriceInterval = setInterval(() => {
+            const cache = window.clipxPriceCache || {};
+            for (const { wsKey, label } of _CLIPX_INS_SYMS) {
+                const entry = cache[wsKey];
+                if (entry) clipxInsApplyTick(label, entry.price, entry.change);
+            }
+        }, 3000);
+    }
+}
+
+// ---- DATA FETCHERS ----
+
+function clipxInsAbort(ms) {
+    const ctrl = new AbortController();
+    setTimeout(() => ctrl.abort(), ms);
+    return ctrl.signal;
+}
+
+// Market tab data — same sources as loadBinanceMarketData (clipx-market-insight widget)
+async function clipxFetchInsightsMarket() {
+    const out = {};
+
+    // 1. Fear & Greed — identical to loadBinanceMarketData
+    try {
+        const r = await fetch('https://api.alternative.me/fng/?limit=1', { signal: clipxInsAbort(8000) });
+        if (r.ok) {
+            const d = await r.json();
+            const e = d?.data?.[0];
+            if (e) out.fearGreed = { value: parseInt(e.value, 10), label: e.value_classification };
+        }
+    } catch (e) { /* ignore */ }
+
+    // 2. Binance 24h tickers — same endpoint as loadBinanceMarketData
+    let allTickers = [];
+    try {
+        const r = await fetch('https://api.binance.com/api/v3/ticker/24hr', { signal: clipxInsAbort(12000) });
+        if (r.ok) allTickers = await r.json();
+    } catch (e) { /* ignore */ }
+
+    if (allTickers.length) {
+        // BTC / ETH / BNB — same symbols as the main widget
+        const mainSymbols = { BTCUSDT: 'BTC', ETHUSDT: 'ETH', BNBUSDT: 'BNB', SOLUSDT: 'SOL' };
+        out.prices = Object.entries(mainSymbols).map(([sym, label]) => {
+            const t = allTickers.find(x => x.symbol === sym);
+            if (!t) return null;
+            return {
+                symbol: label,
+                price: parseFloat(t.lastPrice),
+                change: parseFloat(t.priceChangePercent),
+                volume: parseFloat(t.quoteVolume),
+            };
+        }).filter(Boolean);
+
+        // Filter USDT pairs, strip stablecoins — identical to loadBinanceMarketData usdtPairs logic
+        const excluded = typeof EXCLUDED_BINANCE !== 'undefined'
+            ? EXCLUDED_BINANCE
+            : ['USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'USDP', 'FDUSD', 'USDD'];
+
+        const usdtPairs = allTickers
+            .filter(t => t.symbol.endsWith('USDT') && !excluded.some(s => t.symbol.startsWith(s)))
+            .map(t => ({
+                symbol: t.symbol.replace('USDT', ''),
+                price: parseFloat(t.lastPrice),
+                change: parseFloat(t.priceChangePercent),
+                volume: parseFloat(t.quoteVolume),
+            }));
+
+        // Min $1M volume — same threshold as loadBinanceMarketData
+        const liquid = usdtPairs.filter(c => c.volume >= 1_000_000);
+        out.gainers = [...liquid].sort((a, b) => b.change - a.change).slice(0, 4);
+        out.losers  = [...liquid].sort((a, b) => a.change - b.change).slice(0, 4);
+
+        // Volume leaders (top 5 by quoteVolume) — same as loadBinanceMarketData
+        out.volumeLeaders = [...usdtPairs].sort((a, b) => b.volume - a.volume).slice(0, 5);
+
+        // Heatmap — top 20 by 24h quote volume (same selection as main widget)
+        out.heatmap = [...usdtPairs].sort((a, b) => b.volume - a.volume).slice(0, 20);
+    }
+
+    // 3. CoinGecko trending — same call as loadBinanceMarketData
+    try {
+        const r = await fetch('https://api.coingecko.com/api/v3/search/trending', { signal: clipxInsAbort(8000) });
+        if (r.ok) {
+            const d = await r.json();
+            out.trending = (d?.coins || []).slice(0, 6).map(c => ({
+                name: c.item?.name,
+                symbol: c.item?.symbol,
+                thumb: c.item?.small || c.item?.thumb,
+                price: c.item?.data?.price,
+                change: c.item?.data?.price_change_percentage_24h?.usd,
+            }));
+        }
+    } catch (e) { /* ignore */ }
+
+    return out;
+}
+
+// ── MEME FETCHER ── BNB chain only, split into Recent Migrations (<24h) + Volume Spike (mcap>$100k)
+// Mirrors alpha_radar/lib/services/four_meme_api.dart + dexscreener_api.dart
+async function clipxFetchInsightsMemes() {
+    const FM_URL = 'https://four.meme/meme-api/v1/public/token/search';
+    const FM_HEADERS = {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Referer': 'https://four.meme/en/X-mode-token-list',
+        'User-Agent': 'Mozilla/5.0',
+    };
+
+    // Step 1 — pull graduated tokens from Four.Meme (exact same payloads as alpha_radar)
+    const fmPayloads = [
+        { pageIndex: 1, pageSize: 40, type: 'NEW', status: 'TRADE' },
+        { pageIndex: 1, pageSize: 40, type: 'NEW', listType: 'NOR_DEX' },
+    ];
+    const seen = new Set();
+    const raw = [];
+    for (const payload of fmPayloads) {
+        try {
+            const r = await fetch(FM_URL, {
+                method: 'POST', headers: FM_HEADERS,
+                body: JSON.stringify(payload), signal: clipxInsAbort(12000),
+            });
+            if (!r.ok) continue;
+            const d = await r.json();
+            const items = Array.isArray(d?.data) ? d.data : [];
+            for (const item of items) {
+                const addr = (item.tokenAddress || item.address || '').toLowerCase();
+                if (!addr || !/^0x[a-f0-9]{40}$/.test(addr) || seen.has(addr)) continue;
+                const progress = parseFloat(item.progress ?? 0);
+                if (item.status !== 'TRADE' && progress < 1) continue;
+                seen.add(addr);
+                const rawImg = item.img || item.imageURL || item.image || '';
+                raw.push({
+                    address: addr,
+                    name: item.name || item.fullName || '',
+                    symbol: (item.shortName || item.symbol || '').toUpperCase(),
+                    imageUrl: rawImg
+                        ? (rawImg.startsWith('http') ? rawImg : `https://static.four.meme${rawImg}`)
+                        : null,
+                    // numeric fields from Four.Meme (often unreliable — DexScreener takes precedence)
+                    fm_price: parseFloat(item.lastPrice || item.price) || null,
+                    fm_change24h: parseFloat(item.priceChange24h || item.change24h) || null,
+                    fm_mcap: parseFloat(item.marketCap || item.fdv) || null,
+                    fm_vol: parseFloat(item.volume24h) || null,
+                    fm_holders: parseInt(item.holderCount || item.holders) || null,
+                });
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    if (!raw.length) return { recent: [], volumeSpike: [] };
+
+    // Step 2 — batch-enrich with DexScreener (BSC chain only, same filter as alpha_radar)
+    // DexScreener supports comma-joined addresses in one request
+    const addresses = raw.map(t => t.address);
+    const dexMap = {};
+    const BATCH = 25;
+    const batches = [];
+    for (let i = 0; i < addresses.length; i += BATCH) batches.push(addresses.slice(i, i + BATCH));
+
+    await Promise.all(batches.map(async (batch) => {
+        try {
+            const r = await fetch(
+                `https://api.dexscreener.com/latest/dex/tokens/${batch.join(',')}`,
+                { headers: { Accept: 'application/json' }, signal: clipxInsAbort(14000) }
+            );
+            if (!r.ok) return;
+            const d = await r.json();
+            for (const pair of (d?.pairs || [])) {
+                if (pair.chainId !== 'bsc') continue;
+                // alpha_radar: require Pancakeswap + liquidity > 0 + fdv >= 10000
+                if (!pair.dexId?.toLowerCase().includes('pancake')) continue;
+                if ((pair.liquidity?.usd || 0) <= 0) continue;
+                if ((pair.fdv || 0) < 10_000) continue;
+                const addr = pair.baseToken?.address?.toLowerCase();
+                if (!addr) continue;
+                const existing = dexMap[addr];
+                // Keep pair with highest liquidity per token
+                if (!existing || (pair.liquidity?.usd || 0) > (existing.liquidity || 0)) {
+                    dexMap[addr] = {
+                        priceUsd:    parseFloat(pair.priceUsd) || 0,
+                        change24h:   pair.priceChange?.h24 ?? null,
+                        change1h:    pair.priceChange?.h1  ?? null,
+                        change5m:    pair.priceChange?.m5  ?? null,
+                        vol24h:      pair.volume?.h24 || 0,
+                        vol1h:       pair.volume?.h1  || 0,
+                        liquidity:   pair.liquidity?.usd || 0,
+                        mcap:        pair.fdv || pair.marketCap || 0,
+                        buys24h:     pair.txns?.h24?.buys  || 0,
+                        sells24h:    pair.txns?.h24?.sells || 0,
+                        buys1h:      pair.txns?.h1?.buys   || 0,
+                        sells1h:     pair.txns?.h1?.sells  || 0,
+                        pairCreatedAt: pair.pairCreatedAt || null,   // ms timestamp
+                        dexImageUrl: pair.info?.imageUrl || null,
+                        dexId:       pair.dexId,
+                        pairAddress: pair.pairAddress,
+                    };
+                }
+            }
+        } catch (e) { /* ignore */ }
+    }));
+
+    // Step 3 — merge + classify
+    const cutoff24h = Date.now() - 24 * 60 * 60 * 1000;
+    const merged = raw.map(t => {
+        const dex = dexMap[t.address] || null;
+        return {
+            address:     t.address,
+            name:        t.name,
+            symbol:      t.symbol,
+            imageUrl:    dex?.dexImageUrl || t.imageUrl,
+            price:       dex?.priceUsd   || t.fm_price,
+            change24h:   dex?.change24h  ?? t.fm_change24h,
+            change1h:    dex?.change1h   ?? null,
+            change5m:    dex?.change5m   ?? null,
+            mcap:        dex?.mcap       || t.fm_mcap,
+            vol24h:      dex?.vol24h     || t.fm_vol,
+            vol1h:       dex?.vol1h      || null,
+            liquidity:   dex?.liquidity  || null,
+            buys24h:     dex?.buys24h    || null,
+            sells24h:    dex?.sells24h   || null,
+            buys1h:      dex?.buys1h     || null,
+            sells1h:     dex?.sells1h    || null,
+            holders:     t.fm_holders,
+            migratedAt:  dex?.pairCreatedAt || null,   // when it landed on PancakeSwap
+            pairAddress: dex?.pairAddress  || null,
+            hasDex:      !!dex,
+        };
+    }).filter(t => t.hasDex);   // only show tokens that have a live BSC DEX pair
+
+    // Recently Migrated: pairCreatedAt within last 24h, sort newest first
+    const recent = merged
+        .filter(t => t.migratedAt && t.migratedAt > cutoff24h)
+        .sort((a, b) => (b.migratedAt || 0) - (a.migratedAt || 0))
+        .slice(0, 10);
+
+    // Volume Spike: mcap > $100k sorted by 24h volume desc
+    const volumeSpike = merged
+        .filter(t => (t.mcap || 0) >= 100_000)
+        .sort((a, b) => (b.vol24h || 0) - (a.vol24h || 0))
+        .slice(0, 10);
+
+    return { recent, volumeSpike };
+}
+
+// Trending crypto news via AskSurf Muninn (same endpoint as alpha_radar/lib/services/news_api.dart)
+async function clipxFetchInsightsNews() {
+    const base = (typeof API_BASE !== 'undefined' ? API_BASE : 'https://clipx.app').replace(/\/$/, '');
+    // Try ClipX backend proxy first, then AskSurf Muninn directly as alpha_radar does
+    const urls = [
+        `${base}/api/news?limit=8`,
+        'https://api.asksurf.ai/muninn/v1/ai-news/feed?limit=8',
+    ];
+    for (const url of urls) {
+        try {
+            const r = await fetch(url, { headers: { Accept: 'application/json' }, signal: clipxInsAbort(10000) });
+            if (!r.ok) continue;
+            const d = await r.json();
+            // Normalize all envelope shapes from alpha_radar news_api._extractItems
+            let items = [];
+            if (Array.isArray(d)) items = d;
+            else if (Array.isArray(d?.data?.items)) items = d.data.items;
+            else if (Array.isArray(d?.items)) items = d.items;
+            else if (Array.isArray(d?.data)) items = d.data;
+            if (!items.length) continue;
+            return items.slice(0, 8).map(n => ({
+                title: (n.title || '(untitled)').trim(),
+                summary: (n.summary || n.description || '').trim(),
+                url: n.primary_url || n.url || '',
+                source: n.source?.name || n.source_name || 'Crypto News',
+                publishedAt: n.published_at || n.created_at || null,
+                project: n.project?.name || null,
+            }));
+        } catch (e) { /* try next */ }
+    }
+    return [];
+}
+
+// ---- RENDERERS ----
+
+function clipxInsFmt(n) {
+    if (n == null || isNaN(n)) return '--';
+    const a = Math.abs(n);
+    if (a >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+    if (a >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+    if (a >= 1e3) return `$${(n / 1e3).toFixed(1)}K`;
+    if (a >= 1) return `$${Number(n).toFixed(2)}`;
+    return `$${Number(n).toPrecision(3)}`;
+}
+
+function clipxInsChange(change) {
+    if (change == null || isNaN(change)) return '';
+    const pos = change >= 0;
+    return `<span style="color:${pos ? '#22c55e' : '#ef4444'};font-size:11px;font-weight:600;">${pos ? '+' : ''}${Number(change).toFixed(1)}%</span>`;
+}
+
+function clipxInsTimeAgo(dt) {
+    if (!dt) return '';
+    const d = new Date(dt);
+    if (isNaN(d)) return '';
+    const s = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
+}
+
+function clipxRenderInsMarket(el, data) {
+    const dk   = document.documentElement.getAttribute('data-clipx-x-appearance') === 'dark';
+    const fg   = dk ? '#e7e9ea' : '#0f1419';
+    const muted= dk ? '#71767b' : '#536471';
+    const surf = dk ? '#1e2028' : '#f7f9f9';
+    const div  = dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    const sec  = (t) => `<div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${muted};margin-bottom:6px;">${t}</div>`;
+    const symColors = { BTC:'#f7931a', ETH:'#627eea', BNB:'#f3ba2f', SOL:'#9945ff' };
+    let h = '';
+
+    // ── Fear & Greed ─────────────────────────────────────────────────────
+    if (data?.fearGreed) {
+        const v = data.fearGreed.value;
+        const c = v <= 25 ? '#ef4444' : v <= 45 ? '#f97316' : v <= 55 ? '#eab308' : v <= 75 ? '#84cc16' : '#22c55e';
+        h += `<div style="padding:10px 14px;border-bottom:1px solid ${div};">
+  ${sec('Fear &amp; Greed Index')}
+  <div style="display:flex;align-items:center;gap:12px;">
+    <div>
+      <div style="font-size:24px;font-weight:800;color:${c};line-height:1;font-variant-numeric:tabular-nums;">${v}</div>
+      <div style="font-size:10px;font-weight:600;color:${c};margin-top:2px;">${clipxInsH(data.fearGreed.label)}</div>
+    </div>
+    <div style="flex:1;">
+      <svg width="100%" height="32" viewBox="0 0 120 32" preserveAspectRatio="none">
+        <defs><linearGradient id="clipxFgG" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%"   stop-color="#ef4444"/>
+          <stop offset="33%"  stop-color="#f97316"/>
+          <stop offset="50%"  stop-color="#eab308"/>
+          <stop offset="67%"  stop-color="#84cc16"/>
+          <stop offset="100%" stop-color="#22c55e"/>
+        </linearGradient></defs>
+        <rect x="0" y="12" width="120" height="8" rx="4" fill="${dk ? '#2f3336' : '#e5e7eb'}"/>
+        <rect x="0" y="12" width="${v * 1.2}" height="8" rx="4" fill="url(#clipxFgG)"/>
+        <circle cx="${v * 1.2}" cy="16" r="6" fill="${c}" stroke="${dk ? '#000' : '#fff'}" stroke-width="2"/>
+      </svg>
+      <div style="display:flex;justify-content:space-between;font-size:8px;color:${muted};margin-top:2px;">
+        <span>Fear</span><span>Neutral</span><span>Greed</span>
+      </div>
+    </div>
+  </div>
+</div>`;
+    }
+
+    // ── Live Prices (with IDs for WS updates) ────────────────────────────
+    if (data?.prices?.length) {
+        h += `<div style="padding:10px 14px;border-bottom:1px solid ${div};">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+    ${sec('Live Prices')}
+    <div style="display:flex;align-items:center;gap:3px;margin-top:-4px;">
+      <span id="clipx-ins-live-dot" style="width:5px;height:5px;border-radius:50%;background:#22c55e;display:inline-block;opacity:0.5;transition:opacity 0.3s;"></span>
+      <span style="font-size:8px;color:#22c55e;font-weight:600;">LIVE</span>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">`;
+        for (const p of data.prices) {
+            const ps = p.price >= 1000 ? `$${Math.round(p.price).toLocaleString()}` : `$${Number(p.price).toFixed(2)}`;
+            const cc = symColors[p.symbol] || muted;
+            const pos = p.change >= 0;
+            h += `<div style="background:${surf};padding:7px 9px;border-radius:10px;border:1px solid ${div};">
+      <div style="font-size:9px;font-weight:700;color:${cc};margin-bottom:2px;">${clipxInsH(p.symbol)}</div>
+      <div id="clipx-ins-pr-${p.symbol}" data-p="${p.price}"
+           style="font-size:12px;font-weight:700;color:${fg};font-variant-numeric:tabular-nums;margin-bottom:1px;">${ps}</div>
+      <span id="clipx-ins-ch-${p.symbol}"
+            style="font-size:10px;font-weight:600;color:${pos ? '#22c55e' : '#ef4444'};">${pos ? '+' : ''}${Number(p.change).toFixed(2)}%</span>
+    </div>`;
+        }
+        h += `</div></div>`;
+        // Open dedicated WebSocket for live price ticks
+        clipxInsConnectWs();
+    }
+
+    // ── Gainers / Losers ─────────────────────────────────────────────────
+    if (data?.gainers?.length || data?.losers?.length) {
+        h += `<div style="padding:10px 14px;border-bottom:1px solid ${div};">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">`;
+        for (const [title, coins, color, icon] of [
+            ['Gainers', data.gainers, '#22c55e', '📈'],
+            ['Losers',  data.losers,  '#ef4444', '📉'],
+        ]) {
+            h += `<div><div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:${color};margin-bottom:4px;">${icon} ${title}</div>`;
+            for (const c of (coins || [])) {
+                const ps = c.price >= 1 ? `$${c.price.toFixed(2)}` : `$${c.price.toPrecision(3)}`;
+                h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;border-bottom:1px solid ${div};">
+      <div>
+        <div style="font-size:11px;font-weight:600;color:${fg};">${clipxInsH(c.symbol)}</div>
+        <div style="font-size:9px;color:${muted};">${ps}</div>
+      </div>
+      <span style="font-size:10px;font-weight:700;color:${color};">${c.change >= 0 ? '+' : ''}${c.change.toFixed(1)}%</span>
+    </div>`;
+            }
+            h += `</div>`;
+        }
+        h += `</div></div>`;
+    }
+
+    // ── Volume Leaders ───────────────────────────────────────────────────
+    if (data?.volumeLeaders?.length) {
+        h += `<div style="padding:8px 14px;border-bottom:1px solid ${div};">
+  ${sec('💰 Volume Leaders')}
+  <div style="display:flex;flex-wrap:wrap;gap:4px;">`;
+        for (const c of data.volumeLeaders) {
+            const vm = c.volume / 1_000_000;
+            const vd = vm >= 1000 ? `${(vm / 1000).toFixed(1)}B` : `${vm.toFixed(0)}M`;
+            h += `<span style="background:${surf};border:1px solid ${div};padding:2px 7px;border-radius:20px;font-size:10px;">
+      <span style="color:#38bdf8;font-weight:600;">${clipxInsH(c.symbol)}</span>
+      <span style="color:${muted};"> $${vd}</span>
+    </span>`;
+        }
+        h += `</div></div>`;
+    }
+
+    // ── Heatmap (top 20 by volume, colour by 24h % change) ───────────────
+    if (data?.heatmap?.length) {
+        h += `<div style="padding:8px 14px;border-bottom:1px solid ${div};">
+  ${sec('🔥 Market Heatmap')}
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:3px;">`;
+        for (const c of data.heatmap) {
+            let bg;
+            if (c.change >= 5)       bg = '#07461f';
+            else if (c.change >= 2)  bg = '#338350';
+            else if (c.change >= 0)  bg = '#5e806a';
+            else if (c.change >= -2) bg = '#b36c6c';
+            else if (c.change >= -5) bg = '#ef4444';
+            else                     bg = '#991b1b';
+            const chg = `${c.change >= 0 ? '+' : ''}${c.change.toFixed(1)}%`;
+            h += `<div style="background:${bg};padding:4px 2px;border-radius:4px;text-align:center;" title="${clipxInsH(c.symbol)}: ${chg}">
+      <div style="font-size:9px;font-weight:600;color:#fff;text-shadow:0 1px 1px rgba(0,0,0,0.5);line-height:1.1;">${clipxInsH(c.symbol)}</div>
+      <div style="font-size:8px;color:#fff;line-height:1.1;">${chg}</div>
+    </div>`;
+        }
+        h += `</div></div>`;
+    }
+
+    // ── CoinGecko Trending ───────────────────────────────────────────────
+    if (data?.trending?.length) {
+        h += `<div style="padding:8px 14px;">
+  ${sec('🔥 Trending')}`;
+        for (const t of data.trending) {
+            const img = t.thumb ? `<img src="${clipxInsH(t.thumb)}" style="width:18px;height:18px;border-radius:50%;flex-shrink:0;" alt=""/>` : '';
+            const ps = t.price != null ? (t.price >= 1 ? `$${Number(t.price).toFixed(2)}` : `$${Number(t.price).toPrecision(3)}`) : '';
+            h += `<div style="display:flex;align-items:center;gap:7px;padding:4px 0;border-bottom:1px solid ${div};">
+    ${img}
+    <div style="flex:1;min-width:0;">
+      <span style="font-size:11px;font-weight:600;color:${fg};">${clipxInsH(t.symbol)}</span>
+      <span style="font-size:10px;color:${muted};margin-left:3px;">${clipxInsH(t.name)}</span>
+    </div>
+    <div style="text-align:right;flex-shrink:0;">
+      ${ps ? `<div style="font-size:10px;font-weight:600;color:${fg};">${ps}</div>` : ''}
+      ${t.change != null ? clipxInsChange(t.change) : ''}
+    </div>
+  </div>`;
+        }
+        h += `</div>`;
+    }
+
+    el.innerHTML = h || `<div style="padding:24px 16px;text-align:center;color:${muted};font-size:13px;">No market data available</div>`;
+}
+
+function clipxRenderInsMemes(el, data) {
+    const dk    = document.documentElement.getAttribute('data-clipx-x-appearance') === 'dark';
+    const fg    = dk ? '#e7e9ea' : '#0f1419';
+    const muted = dk ? '#71767b' : '#536471';
+    const surf  = dk ? '#1e2028' : '#f0f3f4';
+    const div   = dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+    const cardBg= dk ? '#16181c' : '#fff';
+
+    const recent      = data?.recent      || [];
+    const volumeSpike = data?.volumeSpike || [];
+
+    if (!recent.length && !volumeSpike.length) {
+        el.innerHTML = `<div style="padding:32px 16px;text-align:center;color:${muted};font-size:13px;">
+          No BNB chain meme tokens found right now.<br>
+          <span style="font-size:11px;opacity:.7;">Checking Four.Meme + PancakeSwap…</span>
+        </div>`;
+        return;
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────
+    const fmtAge = (ms) => {
+        if (!ms) return '';
+        const s = Math.floor((Date.now() - ms) / 1000);
+        if (s <  60) return `${s}s ago`;
+        if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+        if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+        return `${Math.floor(s / 86400)}d ago`;
+    };
+    const fmtNum = (n) => {
+        if (!n) return '--';
+        if (n >= 1e9) return `$${(n/1e9).toFixed(1)}B`;
+        if (n >= 1e6) return `$${(n/1e6).toFixed(1)}M`;
+        if (n >= 1e3) return `$${(n/1e3).toFixed(1)}K`;
+        if (n >= 1)   return `$${n.toFixed(2)}`;
+        return `$${n.toPrecision(3)}`;
+    };
+    const chgSpan = (v, size = 11) => {
+        if (v == null) return '';
+        const pos = v >= 0;
+        return `<span style="font-size:${size}px;font-weight:700;color:${pos?'#22c55e':'#ef4444'};">${pos?'+':''}${Number(v).toFixed(1)}%</span>`;
+    };
+    const avatar = (t) => {
+        if (t.imageUrl) {
+            return `<img src="${clipxInsH(t.imageUrl)}" style="width:38px;height:38px;border-radius:50%;object-fit:cover;flex-shrink:0;background:${surf};" onerror="this.src=''" alt=""/>`;
+        }
+        const letter = (t.symbol || t.name || '?')[0].toUpperCase();
+        const colors = ['#f97316','#a855f7','#3b82f6','#10b981','#f43f5e','#eab308'];
+        const bg = colors[parseInt(t.address.slice(2,4) || '0', 16) % colors.length];
+        return `<div style="width:38px;height:38px;border-radius:50%;background:${bg};flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;color:#fff;">${letter}</div>`;
+    };
+    const dexPairAddr = (t) => t.pairAddress || t.address;
+
+    // ── single token row ─────────────────────────────────────────────────
+    const tokenRow = (t, showAge = false, idx) => {
+        const age   = showAge ? fmtAge(t.migratedAt) : '';
+        const hldr  = t.holders ? `<span style="font-size:10px;color:${muted};">${t.holders.toLocaleString()} hldr</span>` : '';
+        const liq   = t.liquidity ? `<span style="font-size:10px;color:#38bdf8;">Liq ${fmtNum(t.liquidity)}</span>` : '';
+        const vol   = t.vol24h ? `<span style="font-size:10px;color:${muted};">Vol ${fmtNum(t.vol24h)}</span>` : '';
+
+        // ── Buyers / Sellers stat with ratio bar ─────────────────────────
+        let txStat = '';
+        if (t.buys24h || t.sells24h) {
+            const b = t.buys24h || 0;
+            const s = t.sells24h || 0;
+            const total = b + s;
+            const buyPct = total > 0 ? (b / total) * 100 : 50;
+            txStat = `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:3px;">
+          <span style="font-size:9px;color:${muted};text-transform:uppercase;font-weight:700;letter-spacing:.05em;">Buys</span>
+          <span style="font-size:11px;color:#22c55e;font-weight:800;font-variant-numeric:tabular-nums;">${b.toLocaleString()}</span>
+        </div>
+        <div style="flex:1;min-width:60px;height:4px;background:${div};border-radius:2px;overflow:hidden;display:flex;">
+          <div style="width:${buyPct}%;background:#22c55e;"></div>
+          <div style="flex:1;background:#ef4444;"></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:3px;">
+          <span style="font-size:11px;color:#ef4444;font-weight:800;font-variant-numeric:tabular-nums;">${s.toLocaleString()}</span>
+          <span style="font-size:9px;color:${muted};text-transform:uppercase;font-weight:700;letter-spacing:.05em;">Sells</span>
+        </div>
+      </div>`;
+        }
+
+        // ── Market cap highlighted pill (tier color by size) ─────────────
+        let mcapPill = '';
+        if (t.mcap) {
+            let mcColor, mcBg, mcBorder;
+            if (t.mcap >= 1_000_000) {
+                mcColor = '#fbbf24'; mcBg = 'rgba(251,191,36,0.12)'; mcBorder = 'rgba(251,191,36,0.4)';
+            } else if (t.mcap >= 100_000) {
+                mcColor = '#22c55e'; mcBg = 'rgba(34,197,94,0.12)'; mcBorder = 'rgba(34,197,94,0.35)';
+            } else {
+                mcColor = '#38bdf8'; mcBg = 'rgba(56,189,248,0.10)'; mcBorder = 'rgba(56,189,248,0.30)';
+            }
+            mcapPill = `<span style="display:inline-flex;align-items:center;gap:3px;background:${mcBg};border:1px solid ${mcBorder};color:${mcColor};font-size:11px;font-weight:800;padding:2px 8px;border-radius:6px;font-variant-numeric:tabular-nums;letter-spacing:.01em;">
+          <span style="font-size:8px;font-weight:700;opacity:.75;letter-spacing:.08em;">MC</span>${fmtNum(t.mcap)}
+        </span>`;
+        }
+
+        const priceStr = t.price ? (t.price >= 1 ? `$${t.price.toFixed(2)}` : `$${t.price.toPrecision(4)}`) : '--';
+
+        return `<div class="clipx-meme-row" data-idx="${idx}" data-addr="${t.address}" data-sym="${clipxInsH(t.symbol)}" data-mcap="${t.mcap || ''}" data-price="${t.price || ''}" data-change="${t.change24h ?? ''}" style="padding:10px 14px;border-bottom:1px solid ${div};">
+  <div style="display:flex;align-items:flex-start;gap:10px;">
+    ${avatar(t)}
+    <div style="flex:1;min-width:0;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:6px;flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;min-width:0;">
+          <span style="font-size:13px;font-weight:800;color:${fg};">${clipxInsH(t.symbol || '?')}</span>
+          <span style="font-size:11px;color:${muted};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:80px;">${clipxInsH(t.name)}</span>
+          ${age ? `<span style="font-size:9px;font-weight:700;background:rgba(29,155,240,0.12);color:#1d9bf0;padding:1px 5px;border-radius:4px;">${age}</span>` : ''}
+        </div>
+        ${mcapPill}
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:4px;flex-wrap:wrap;">
+        <span style="font-size:12px;font-weight:700;color:${fg};font-variant-numeric:tabular-nums;">${priceStr}</span>
+        ${chgSpan(t.change24h, 10)}
+        ${t.change1h != null ? `<span style="font-size:9px;color:${muted};">·</span>${chgSpan(t.change1h, 9)}<span style="font-size:8px;color:${muted};">1h</span>` : ''}
+      </div>
+      ${txStat}
+      <div style="display:flex;align-items:center;gap:6px;margin-top:3px;flex-wrap:wrap;">
+        ${vol}
+        ${liq}
+        ${hldr}
+      </div>
+      <div class="clipx-meme-actions" style="margin-top:6px;">
+        <button data-action="trade"
+          style="padding:4px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;border:1px solid rgba(34,197,94,0.3);background:rgba(34,197,94,0.1);color:#22c55e;">Buy / Sell</button>
+      </div>
+    </div>
+  </div>
+</div>`;
+    };
+
+    // ── section header ───────────────────────────────────────────────────
+    const sectionHead = (icon, title, sub, color) =>
+        `<div style="padding:9px 14px 6px;border-bottom:1px solid ${div};display:flex;align-items:center;justify-content:space-between;">
+  <div>
+    <span style="font-size:12px;font-weight:800;color:${color};">${icon} ${title}</span>
+    <span style="font-size:10px;color:${muted};margin-left:6px;">${sub}</span>
+  </div>
+</div>`;
+
+    let html = '';
+
+    if (recent.length) {
+        html += sectionHead('🆕', 'Recently Migrated', `${recent.length} in past 24h · BNB Chain`, '#1d9bf0');
+        html += recent.map((t, i) => tokenRow(t, true, `r${i}`)).join('');
+    }
+
+    if (volumeSpike.length) {
+        html += sectionHead('⚡', 'Volume Spike', 'MCap > $100k · sorted by volume', '#f97316');
+        html += volumeSpike.map((t, i) => tokenRow(t, false, `v${i}`)).join('');
+    }
+
+    el.innerHTML = html;
+
+    // ── wire up Buy / Sell buttons ───────────────────────────────────────
+    el.querySelectorAll('.clipx-meme-actions button').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const row = btn.closest('.clipx-meme-row');
+            if (!row) return;
+            const addr   = row.dataset.addr;
+            const sym    = row.dataset.sym;
+            const mcap   = parseFloat(row.dataset.mcap) || null;
+            const price  = parseFloat(row.dataset.price) || null;
+            const change = row.dataset.change !== '' ? parseFloat(row.dataset.change) : null;
+            if (typeof showTradeModal === 'function') {
+                showTradeModal(addr, sym, 'bnb', {
+                    priceUsd: price,
+                    priceChange: change,
+                    marketCapUsd: mcap,
+                }, btn);
+            }
+        });
+        // Subtle press animation
+        btn.addEventListener('pointerdown', () => { btn.style.transform = 'translateY(1px)'; });
+        btn.addEventListener('pointerup',   () => { btn.style.transform = ''; });
+        btn.addEventListener('pointerleave',() => { btn.style.transform = ''; });
+    });
+
+}
+
+function clipxRenderInsNews(el, news) {
+    const dk    = document.documentElement.getAttribute('data-clipx-x-appearance') === 'dark';
+    const fg    = dk ? '#e7e9ea' : '#0f1419';
+    const muted = dk ? '#71767b' : '#536471';
+    const badge = dk ? '#1e2028' : '#f0f3f4';
+    const div   = dk ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+
+    if (!news?.length) {
+        el.innerHTML = `<div style="padding:24px 16px;text-align:center;color:${muted};font-size:13px;">No news available</div>`;
+        return;
+    }
+
+    el.innerHTML = news.map(n => `
+<a href="${clipxInsH(n.url || '#')}" target="_blank" rel="noopener noreferrer"
+   style="display:block;padding:11px 16px;text-decoration:none;border-bottom:1px solid ${div};">
+  <div style="font-size:13px;font-weight:600;color:${fg};line-height:1.4;margin-bottom:4px;">${clipxInsH(n.title)}</div>
+  ${n.summary ? `<div style="font-size:11px;color:${muted};line-height:1.4;margin-bottom:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${clipxInsH(n.summary)}</div>` : ''}
+  <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap;">
+    <span style="font-size:10px;font-weight:600;background:${badge};color:${muted};padding:2px 6px;border-radius:4px;">${clipxInsH(n.source)}</span>
+    ${n.project ? `<span style="font-size:10px;font-weight:600;background:rgba(29,155,240,0.1);color:#1d9bf0;padding:2px 6px;border-radius:4px;">${clipxInsH(n.project)}</span>` : ''}
+    ${n.publishedAt ? `<span style="font-size:10px;color:${muted};">${clipxInsTimeAgo(n.publishedAt)}</span>` : ''}
+  </div>
+</a>`).join('');
+}
+
+// ---- STYLES ----
+
+function clipxInjectInsightsSidebarStyles() {
+    if (document.getElementById('clipx-insights-sidebar-styles')) return;
+    const st = document.createElement('style');
+    st.id = 'clipx-insights-sidebar-styles';
+    st.textContent = `
+/* ── Wrapper — sticky hero so it stays visible while the timeline scrolls ── */
+#clipx-trending-accounts-card {
+  width:100%;max-width:100%;box-sizing:border-box;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  margin-bottom:16px;
+  position:sticky;
+  top:56px;           /* clears X.com's sticky search bar at the top of the column */
+  z-index:1;
+}
+/* ── Shell — subtle backdrop blur so it layers nicely while sticky ── */
+#clipx-trending-accounts-card .clipx-ins-shell {
+  border-radius:16px;
+  border:1px solid #e6e8ea;
+  box-shadow:0 4px 16px rgba(0,0,0,0.08);
+  background:rgba(255,255,255,0.96);
+  backdrop-filter:saturate(180%) blur(12px);
+  -webkit-backdrop-filter:saturate(180%) blur(12px);
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-shell {
+  border:1px solid #2f3336;
+  box-shadow:0 4px 20px rgba(0,0,0,0.55);
+  background:rgba(11,13,15,0.92);
+}
+/* ── Header ── */
+#clipx-trending-accounts-card .clipx-ins-header {
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 16px 12px;
+  border-bottom:1px solid #e6e8ea;
+  background:inherit;
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-header {
+  border-bottom:1px solid #2f3336;
+}
+/* ── Logo wordmark (X icon + ClipX) ── */
+#clipx-trending-accounts-card .clipx-ins-logo {
+  font-size:11px;font-weight:700;letter-spacing:.04em;
+  color:#536471;text-decoration:none;transition:color .15s;
+}
+#clipx-trending-accounts-card .clipx-ins-logo:hover { color:#1d9bf0; }
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-logo { color:#71767b; }
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-logo:hover { color:#1d9bf0; }
+/* ── Title ── */
+#clipx-trending-accounts-card .clipx-ins-title {
+  font-size:16px;font-weight:800;color:#0f1419;line-height:1.2;letter-spacing:-.01em;
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-title {
+  color:#e7e9ea;
+}
+/* ── Collapse chevron ── */
+#clipx-trending-accounts-card .clipx-ins-chevron {
+  color:#71767b;transition:transform 220ms cubic-bezier(.4,0,.2,1);flex-shrink:0;
+}
+#clipx-trending-accounts-card.clipx-ins-collapsed .clipx-ins-chevron {
+  transform:rotate(180deg);
+}
+/* ── Tabs ── */
+#clipx-trending-accounts-card .clipx-ins-tabs {
+  display:flex;border-bottom:1px solid #e6e8ea;
+  background:inherit;
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-tabs {
+  border-bottom:1px solid #2f3336;
+}
+#clipx-trending-accounts-card .clipx-ins-tab {
+  flex:1;background:none;border:none;padding:11px 4px 10px;
+  font-size:13px;font-weight:600;color:#71767b;
+  cursor:pointer;position:relative;transition:color 150ms ease;
+}
+#clipx-trending-accounts-card .clipx-ins-tab:hover { color:#0f1419; }
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-tab:hover { color:#e7e9ea; }
+#clipx-trending-accounts-card .clipx-ins-tab.active { color:#0f1419; }
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-tab.active { color:#e7e9ea; }
+#clipx-trending-accounts-card .clipx-ins-tab.active::after {
+  content:'';position:absolute;bottom:0;left:20%;right:20%;
+  height:2px;background:#1d9bf0;border-radius:2px 2px 0 0;
+}
+/* ── Body scroll ── */
+#clipx-trending-accounts-card .clipx-ins-body {
+  max-height:460px;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  overscroll-behavior-y:contain;
+  scrollbar-width:thin;
+  scrollbar-color:rgba(0,0,0,0.18) transparent;
+  /* Explicit position so scroll context is self-contained */
+  position:relative;
+  z-index:0;
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-body {
+  scrollbar-color:rgba(255,255,255,0.18) transparent;
+}
+#clipx-trending-accounts-card .clipx-ins-body::-webkit-scrollbar { width:4px; }
+#clipx-trending-accounts-card .clipx-ins-body::-webkit-scrollbar-track { background:transparent; }
+#clipx-trending-accounts-card .clipx-ins-body::-webkit-scrollbar-thumb {
+  background:rgba(0,0,0,0.18);border-radius:4px;
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-body::-webkit-scrollbar-thumb {
+  background:rgba(255,255,255,0.18);
+}
+/* ── Loading skeleton ── */
+#clipx-trending-accounts-card .clipx-ins-skeleton {
+  padding:20px 16px;display:flex;flex-direction:column;gap:10px;
+}
+#clipx-trending-accounts-card .clipx-ins-skel-line {
+  height:12px;border-radius:6px;
+  background:linear-gradient(90deg,#e5e7eb 25%,#f3f4f6 50%,#e5e7eb 75%);
+  background-size:200% 100%;
+  animation:clipxInsSkelShimmer 1.4s ease infinite;
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-skel-line {
+  background:linear-gradient(90deg,#1e2228 25%,#2a2d35 50%,#1e2228 75%);
+  background-size:200% 100%;
+}
+@keyframes clipxInsSkelShimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+/* ── Row hover ── */
+#clipx-trending-accounts-card .clipx-ins-body a:hover {
+  background:rgba(0,0,0,0.03);
+}
+html[data-clipx-x-appearance="dark"] #clipx-trending-accounts-card .clipx-ins-body a:hover {
+  background:rgba(255,255,255,0.04);
+}
+`;
+    document.head.appendChild(st);
+}
+
+// ---- CARD HTML ----
+
+function clipxBuildInsightsCardHtml(collapsed) {
+    const iconUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
+        ? chrome.runtime.getURL('public/icon.png')
+        : '';
+    const logoEl = iconUrl
+        ? `<img src="${iconUrl}" style="width:24px;height:24px;border-radius:7px;flex-shrink:0;object-fit:cover;" alt="ClipX"/>`
+        : `<span style="font-size:18px;font-weight:900;background:linear-gradient(135deg,#1d9bf0,#7c3aed);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">C</span>`;
+    return `<div class="clipx-ins-shell">
+  <div class="clipx-ins-header">
+    <button type="button" id="clipx-ins-head-toggle"
+            style="display:flex;align-items:center;gap:7px;background:none;border:none;padding:0;cursor:pointer;text-align:left;">
+      ${logoEl}
+      <span class="clipx-ins-title">ClipX Insights</span>
+      <svg class="clipx-ins-chevron" width="14" height="14" fill="none" viewBox="0 0 24 24"
+           stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <a href="https://x.com/clipx0_" target="_blank" rel="noopener noreferrer" class="clipx-ins-logo" style="display:flex;align-items:center;gap:4px;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+      <span>ClipX</span>
+    </a>
+  </div>
+  <div id="clipx-ins-expand"${collapsed ? ' style="display:none;"' : ''}>
+    <div class="clipx-ins-tabs">
+      <button type="button" class="clipx-ins-tab" data-tab="market">Market</button>
+      <button type="button" class="clipx-ins-tab" data-tab="memes">Memes</button>
+      <button type="button" class="clipx-ins-tab active" data-tab="trending">Trending</button>
+    </div>
+    <div class="clipx-ins-body" id="clipx-ins-body">
+      <div class="clipx-ins-skeleton">
+        <div class="clipx-ins-skel-line" style="width:60%;height:14px;"></div>
+        <div class="clipx-ins-skel-line" style="width:100%;"></div>
+        <div class="clipx-ins-skel-line" style="width:85%;"></div>
+        <div class="clipx-ins-skel-line" style="width:90%;"></div>
+        <div class="clipx-ins-skel-line" style="width:70%;"></div>
+      </div>
+    </div>
+  </div>
+</div>`;
+}
+
+// ---- LOAD TAB ----
+
+async function clipxLoadInsightsTab(tab, bodyEl) {
+    clipxSyncXAppearanceAttribute();
+    // Disconnect WS when leaving Market tab (reconnects when returning)
+    if (tab !== 'market') clipxInsDisconnectWs();
+
+    bodyEl.innerHTML = `<div class="clipx-ins-skeleton">
+      <div class="clipx-ins-skel-line" style="width:55%;height:14px;"></div>
+      <div class="clipx-ins-skel-line" style="width:100%;"></div>
+      <div class="clipx-ins-skel-line" style="width:80%;"></div>
+      <div class="clipx-ins-skel-line" style="width:95%;"></div>
+      <div class="clipx-ins-skel-line" style="width:65%;"></div>
+      <div class="clipx-ins-skel-line" style="width:88%;"></div>
+    </div>`;
+
+    if (tab === 'market') {
+        const data = await clipxFetchInsightsMarket();
+        clipxRenderInsMarket(bodyEl, data);
+    } else if (tab === 'memes') {
+        // Meme fetch is slower (Four.Meme + DexScreener batch) — show context in skeleton
+        const dk = document.documentElement.getAttribute('data-clipx-x-appearance') === 'dark';
+        const mu = dk ? '#71767b' : '#536471';
+        bodyEl.innerHTML = `<div style="padding:10px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#1d9bf0;">🆕 Recently Migrated</div>
+          <div class="clipx-ins-skeleton" style="padding:8px 14px;">
+            <div class="clipx-ins-skel-line" style="width:100%;height:38px;border-radius:8px;"></div>
+            <div class="clipx-ins-skel-line" style="width:100%;height:38px;border-radius:8px;"></div>
+            <div class="clipx-ins-skel-line" style="width:100%;height:38px;border-radius:8px;"></div>
+          </div>
+          <div style="padding:10px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#f97316;">⚡ Volume Spike</div>
+          <div class="clipx-ins-skeleton" style="padding:8px 14px;">
+            <div class="clipx-ins-skel-line" style="width:100%;height:38px;border-radius:8px;"></div>
+            <div class="clipx-ins-skel-line" style="width:100%;height:38px;border-radius:8px;"></div>
+          </div>
+          <div style="text-align:center;padding:8px;font-size:10px;color:${mu};">Fetching from Four.Meme + PancakeSwap…</div>`;
+        const data = await clipxFetchInsightsMemes();
+        clipxRenderInsMemes(bodyEl, data);
+    } else {
+        const news = await clipxFetchInsightsNews();
+        clipxRenderInsNews(bodyEl, news);
+    }
+}
+
+// ---- MOUNT ----
+
+function injectClipxTrendingAccountsSidebar() {
+    if (!clipxInsightsSidebarEnabled) return;
+
+    // If our card is already in the DOM and connected, DO NOTHING.
+    // Repositioning via insertBefore moves the element, which destroys its scroll context
+    // and resets scrollTop to 0 — same root cause as confirmed by debug runtime logs.
+    const existing = document.getElementById('clipx-trending-accounts-card');
+    if (existing && existing.isConnected) return;
+    if (existing) existing.remove();
+
+    const mount = clipxFindInsightsSidebarMount();
+    if (!mount) return;
+
+    let collapsed = false;
+    // Always default to Trending news on every fresh page load.
+    let activeTab = 'trending';
+    try { collapsed = localStorage.getItem('clipx-insights-collapsed') === '1'; } catch (e) { /* ignore */ }
+    // Clear any previously persisted tab selection so it doesn't override the default.
+    try { localStorage.removeItem('clipx-insights-tab'); } catch (e) { /* ignore */ }
+
+    clipxInjectInsightsSidebarStyles();
+
+    const wrap = document.createElement('div');
+    wrap.id = 'clipx-trending-accounts-card';
+    if (collapsed) wrap.classList.add('clipx-ins-collapsed');
+    wrap.style.cssText = 'width:100%;max-width:100%;box-sizing:border-box;';
+    wrap.innerHTML = clipxBuildInsightsCardHtml(collapsed);
+
+    mount.container.insertBefore(wrap, mount.before);
+
+    const bodyEl = wrap.querySelector('#clipx-ins-body');
+
+    // Restore saved active tab visual state
+    if (activeTab !== 'market') {
+        wrap.querySelectorAll('.clipx-ins-tab').forEach(b => {
+            b.classList.toggle('active', b.getAttribute('data-tab') === activeTab);
+        });
+    }
+
+    // Collapse toggle
+    wrap.querySelector('#clipx-ins-head-toggle')?.addEventListener('click', () => {
+        collapsed = !collapsed;
+        const ex = wrap.querySelector('#clipx-ins-expand');
+        if (collapsed) {
+            wrap.classList.add('clipx-ins-collapsed');
+            if (ex) ex.style.display = 'none';
+            try { localStorage.setItem('clipx-insights-collapsed', '1'); } catch (e) { /* ignore */ }
+        } else {
+            wrap.classList.remove('clipx-ins-collapsed');
+            if (ex) ex.style.display = '';
+            try { localStorage.setItem('clipx-insights-collapsed', '0'); } catch (e) { /* ignore */ }
+            clipxLoadInsightsTab(activeTab, bodyEl);
+        }
+    });
+
+    // Tab switch — selection is in-session only; next page load resets to Trending default.
+    wrap.querySelectorAll('.clipx-ins-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const t = btn.getAttribute('data-tab');
+            if (t === activeTab) return;
+            activeTab = t;
+            wrap.querySelectorAll('.clipx-ins-tab').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === t));
+            clipxLoadInsightsTab(activeTab, bodyEl);
+        });
+    });
+
+    if (!collapsed) {
+        clipxLoadInsightsTab(activeTab, bodyEl);
+    }
+}
+
+function clipxScheduleTrendingAccountsInject() {
+    if (_clipxInsightsInjectTimer) clearTimeout(_clipxInsightsInjectTimer);
+    _clipxInsightsInjectTimer = setTimeout(() => {
+        _clipxInsightsInjectTimer = null;
+        try {
+            if (!clipxInsightsSidebarEnabled) { clipxRemoveInsightsSidebar(); return; }
+            const el = document.getElementById('clipx-trending-accounts-card');
+            if (el && !el.isConnected) el.remove();
+            injectClipxTrendingAccountsSidebar();
+        } catch (e) {
+            console.warn('[ClipX] insights sidebar:', e);
+        }
+    }, 400);
+}
+
+chrome.storage.local.get(['showTrendingAccountsSidebar'], (r) => {
+    clipxInsightsSidebarEnabled = r.showTrendingAccountsSidebar !== false;
+    clipxScheduleTrendingAccountsInject();
+});
+
+const clipxTrendingSidebarObserver = new MutationObserver(() => clipxScheduleTrendingAccountsInject());
+clipxTrendingSidebarObserver.observe(document.documentElement, { childList: true, subtree: true });
+
+window.addEventListener('popstate', clipxScheduleTrendingAccountsInject);
+
+// ====================
 // CRYPTO MARKET INSIGHT WIDGET
 // ====================
 
@@ -11410,6 +12542,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             injectCryptoInsightWidget();
         } else if (!marketInsightEnabled && existing) {
             existing.remove();
+        }
+
+        if (request.showTrendingAccountsSidebar !== undefined) {
+            clipxInsightsSidebarEnabled = request.showTrendingAccountsSidebar !== false;
+            if (!clipxInsightsSidebarEnabled) {
+                clipxRemoveInsightsSidebar();
+            } else {
+                clipxScheduleTrendingAccountsInject();
+            }
         }
 
         if (request.showSurfSocial === false) {

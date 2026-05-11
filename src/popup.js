@@ -1645,6 +1645,9 @@ if (saveTradeSettingsBtn) {
         const showMarketInsightToggle = document.getElementById('showMarketInsightToggle');
         const showMarketInsight = showMarketInsightToggle ? showMarketInsightToggle.checked : true;
 
+        const showTrendingAccountsSidebarToggle = document.getElementById('showTrendingAccountsSidebarToggle');
+        const showTrendingAccountsSidebar = showTrendingAccountsSidebarToggle ? showTrendingAccountsSidebarToggle.checked : true;
+
         // Get Label Effect Style
         const labelEffectSelect = document.getElementById('labelEffectStyle');
         const labelEffectStyle = labelEffectSelect ? labelEffectSelect.value : 'gradient';
@@ -1658,6 +1661,7 @@ if (saveTradeSettingsBtn) {
         chrome.storage.local.set({
             showTipsButtons: showTipsButtons,
             showMarketInsight: showMarketInsight,
+            showTrendingAccountsSidebar: showTrendingAccountsSidebar,
             labelEffectStyle: labelEffectStyle,
             tokenPillStyle: tokenPillStyle,
             useDashboardWalletSwap: useDashboardWalletSwap,
@@ -1672,6 +1676,7 @@ if (saveTradeSettingsBtn) {
                         action: 'refreshSettings',
                         showTipsButtons: showTipsButtons,
                         showMarketInsight: showMarketInsight,
+                        showTrendingAccountsSidebar: showTrendingAccountsSidebar,
                         labelEffectStyle: labelEffectStyle,
                         tokenPillStyle: tokenPillStyle
                     });
@@ -1756,6 +1761,13 @@ if (settingsBtn) {
                     const marketInsightToggle = document.getElementById('showMarketInsightToggle');
                     if (marketInsightToggle) {
                         marketInsightToggle.checked = mi.showMarketInsight !== false;
+                    }
+                });
+
+                chrome.storage.local.get(['showTrendingAccountsSidebar'], (ta) => {
+                    const taToggle = document.getElementById('showTrendingAccountsSidebarToggle');
+                    if (taToggle) {
+                        taToggle.checked = ta.showTrendingAccountsSidebar !== false;
                     }
                 });
 

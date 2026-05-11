@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClipX - Track & Trade on X",
-  "version": "1.51.0",
+  "version": "1.52.0",
   "description": "ClipX - Your Co-Pilot & Profile Intelligence for X",
   "icons": {
     "16": "public/icon.png",
@@ -88,7 +88,8 @@
         "src/kaching.mp3",
         "src/contracts/TokenManager2.lite.abi",
         "src/contracts/TokenManagerHelper3.abi",
-        "public/bs.png"
+        "public/bs.png",
+        "public/icon.png"
       ],
       "matches": [
         "https://x.com/*",
